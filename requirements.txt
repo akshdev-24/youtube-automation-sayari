@@ -1,21 +1,12 @@
-# Gemini API and Google Auth
 google-genai
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 
-# Text-to-Speech and Video Editing
-gTTS
 moviepy==1.0.3
-
-# For Pexels API
-requests
-
-# For image processing (e.g., slides, thumbnails)
 Pillow==9.5.0
-numpy
+numpy<2
+imageio
+imageio-ffmpeg
 
-# For MP3 to WAV conversion
-pydub
-
-edge-tts
+requests
