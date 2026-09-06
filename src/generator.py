@@ -4,22 +4,21 @@
 #
 # HINDI MOTIVATION YOUTUBE AUTOMATION
 #
-# Features:
-#   ✅ Gemini content generation
-#   ✅ Hindi motivational curriculum
-#   ✅ Natural Hindi Neural Voice
-#   ✅ Edge TTS
-#   ✅ Hindi / Devanagari font detection
-#   ✅ Voice timing / VTT timing
+# Fixed version:
+#   ✅ MoviePy VideoClip NumPy frame fix
+#   ✅ No more AttributeError: shape
+#   ✅ Edge TTS Hindi neural voice
+#   ✅ VTT timing support
+#   ✅ Reliable timing fallback
 #   ✅ Animated kinetic typography
 #   ✅ Speech-synced text highlighting
-#   ✅ Word/chunk based text animation
 #   ✅ Long-form videos
 #   ✅ YouTube Shorts
-#   ✅ Pexels background visuals
-#   ✅ Cinematic dark background
+#   ✅ Pexels visuals
+#   ✅ Cinematic background
 #   ✅ Background music
 #   ✅ Professional thumbnails
+#   ✅ Hindi / Devanagari font detection
 #   ✅ GitHub Actions compatible
 #
 # ============================================================
@@ -40,6 +39,7 @@ from pathlib import Path
 from io import BytesIO
 
 import requests
+import numpy as np
 
 from google import genai
 
@@ -78,30 +78,29 @@ YOUR_NAME = "Aksh Dev"
 
 CHANNEL_NICHE = "Hindi Motivation"
 
-# ------------------------------------------------------------
-# Gemini
-# ------------------------------------------------------------
+
+# ============================================================
+# GEMINI
+# ============================================================
 
 GEMINI_MODEL = "gemini-3.6-flash"
 
-# ------------------------------------------------------------
-# Edge TTS
-# ------------------------------------------------------------
+
+# ============================================================
+# EDGE TTS
+# ============================================================
 
 TTS_LANGUAGE = "hi"
 
-# Natural Indian Hindi male voice
 TTS_VOICE = "hi-IN-MadhurNeural"
-
-# Female alternative:
-# hi-IN-SwaraNeural
 
 TTS_RETRIES = 5
 TTS_BACKOFF = 5
 
-# ------------------------------------------------------------
-# Video
-# ------------------------------------------------------------
+
+# ============================================================
+# VIDEO
+# ============================================================
 
 LONG_WIDTH = 1920
 LONG_HEIGHT = 1080
@@ -111,23 +110,26 @@ SHORT_HEIGHT = 1920
 
 FPS = 24
 
-# ------------------------------------------------------------
-# Text animation
-# ------------------------------------------------------------
+
+# ============================================================
+# TEXT ANIMATION
+# ============================================================
 
 WORDS_PER_HIGHLIGHT = 3
 
 TEXT_ANIMATION_IN = 0.22
 
-# ------------------------------------------------------------
-# Audio
-# ------------------------------------------------------------
+
+# ============================================================
+# AUDIO
+# ============================================================
 
 BACKGROUND_MUSIC_VOLUME = 0.065
 
-# ------------------------------------------------------------
+
+# ============================================================
 # SEO
-# ------------------------------------------------------------
+# ============================================================
 
 MAX_TAGS = 25
 
@@ -137,20 +139,10 @@ MAX_TAGS = 25
 # ============================================================
 
 def find_hindi_font():
-    """
-    Find a proper Hindi / Devanagari font.
-
-    Priority:
-        1. Project font
-        2. Noto Sans Devanagari
-        3. System Noto
-        4. DejaVu
-        5. Arial fallback
-    """
 
     candidates = [
 
-        # Project fonts
+        # Project font
         ASSETS_PATH /
         "fonts" /
         "NotoSansDevanagari-Regular.ttf",
@@ -179,13 +171,24 @@ def find_hindi_font():
             "NotoSansDevanagari-Medium.ttf"
         ),
 
+        Path(
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansDevanagari-Medium.ttf"
+        ),
+
+        # Other common Devanagari fonts
+        Path(
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSansDevanagari-Bold.ttf"
+        ),
+
         # DejaVu fallback
         Path(
             "/usr/share/fonts/truetype/dejavu/"
             "DejaVuSans.ttf"
         ),
 
-        # Existing project fallback
+        # Project fallback
         ASSETS_PATH /
         "fonts" /
         "arial.ttf",
@@ -272,7 +275,6 @@ def clean_json_response(text):
 
     text = str(text).strip()
 
-    # Remove markdown fences
     text = re.sub(
         r"^```json\s*",
         "",
@@ -292,7 +294,6 @@ def clean_json_response(text):
         text
     )
 
-    # Find JSON object
     start = text.find("{")
     end = text.rfind("}")
 
@@ -326,38 +327,25 @@ def get_pexels_image(
 
         return None
 
-    if video_type == "short":
-
-        orientation = "portrait"
-
-    else:
-
-        orientation = "landscape"
+    orientation = (
+        "portrait"
+        if video_type == "short"
+        else "landscape"
+    )
 
     motivation_keywords = [
 
         "motivation",
-
         "success",
-
         "discipline",
-
         "focus",
-
         "confidence",
-
         "determination",
-
         "achievement",
-
         "journey",
-
         "dream",
-
         "hard work",
-
         "courage",
-
     ]
 
     keyword = random.choice(
@@ -377,11 +365,8 @@ def get_pexels_image(
     }
 
     params = {
-
         "query": search_query,
-
         "orientation": orientation,
-
         "per_page": 15,
     }
 
@@ -471,7 +456,6 @@ def create_fallback_background(
         image
     )
 
-    # Subtle gradient
     for y in range(height):
 
         ratio = (
@@ -533,16 +517,10 @@ def prepare_background(
 
     if image is None:
 
-        image = (
-            create_fallback_background(
-                width,
-                height
-            )
+        image = create_fallback_background(
+            width,
+            height
         )
-
-    # --------------------------------------------------------
-    # Cover crop
-    # --------------------------------------------------------
 
     source_ratio = (
         image.width /
@@ -599,19 +577,11 @@ def prepare_background(
         )
     )
 
-    # --------------------------------------------------------
-    # Cinematic blur
-    # --------------------------------------------------------
-
     image = image.filter(
         ImageFilter.GaussianBlur(
             radius=1.4
         )
     )
-
-    # --------------------------------------------------------
-    # Dark cinematic overlay
-    # --------------------------------------------------------
 
     overlay = Image.new(
         "RGBA",
@@ -638,7 +608,7 @@ def prepare_background(
 
 
 # ============================================================
-# CURRICULUM GENERATION
+# CURRICULUM
 # ============================================================
 
 def generate_curriculum(
@@ -730,7 +700,7 @@ Return ONLY valid JSON:
 
 
 # ============================================================
-# LESSON CONTENT GENERATION
+# LESSON CONTENT
 # ============================================================
 
 def generate_lesson_content(
@@ -896,17 +866,6 @@ def text_to_speech(
     text,
     output_path
 ):
-    """
-    Generate natural Hindi neural speech.
-
-    Uses Edge TTS.
-
-    Creates:
-
-        .mp3
-        .wav
-        .timing.vtt
-    """
 
     text = str(
         text or ""
@@ -927,7 +886,6 @@ def text_to_speech(
         exist_ok=True
     )
 
-    # Always use mp3 as Edge output
     mp3_path = output_path.with_suffix(
         ".mp3"
     )
@@ -951,13 +909,19 @@ def text_to_speech(
 
         try:
 
-            if mp3_path.exists():
+            for path in [
+                mp3_path,
+                vtt_path,
+                timing_path,
+                output_path,
+            ]:
 
-                mp3_path.unlink()
+                if path.exists():
 
-            if vtt_path.exists():
-
-                vtt_path.unlink()
+                    try:
+                        path.unlink()
+                    except Exception:
+                        pass
 
             command = [
 
@@ -1003,10 +967,6 @@ def text_to_speech(
                     "Edge TTS MP3 was not created."
                 )
 
-            # ------------------------------------------------
-            # Convert MP3 to WAV
-            # ------------------------------------------------
-
             audio = AudioSegment.from_mp3(
                 mp3_path
             )
@@ -1015,10 +975,6 @@ def text_to_speech(
                 output_path,
                 format="wav"
             )
-
-            # ------------------------------------------------
-            # Preserve VTT timing
-            # ------------------------------------------------
 
             if vtt_path.exists():
 
@@ -1153,7 +1109,6 @@ def generate_visuals(
         width = 1280
         height = 720
 
-        # Use random motivational background
         image = prepare_background(
             "long",
             "motivational success person"
@@ -1175,7 +1130,6 @@ def generate_visuals(
             thumbnail_title
         ).strip()
 
-        # Limit thumbnail text
         if len(text) > 80:
 
             text = text[:77] + "..."
@@ -1217,7 +1171,6 @@ def generate_visuals(
                 text_width
             ) // 2
 
-            # Black outline
             draw.text(
                 (
                     x,
@@ -1231,10 +1184,6 @@ def generate_visuals(
             )
 
             y += line_height
-
-        # ----------------------------------------------------
-        # Branding
-        # ----------------------------------------------------
 
         brand = (
             f"{YOUR_NAME} • "
@@ -1263,10 +1212,6 @@ def generate_visuals(
             stroke_width=3,
             stroke_fill="black"
         )
-
-        # ----------------------------------------------------
-        # JPEG thumbnail
-        # ----------------------------------------------------
 
         path = (
             output_dir /
@@ -1302,17 +1247,12 @@ def generate_visuals(
         )
     ).strip()
 
-    content = str(
-        slide_content.get(
-            "content",
-            ""
-        )).strip()
-
     visual_query = str(
         slide_content.get(
             "visual_query",
             "motivation"
-        )).strip()
+        )
+    ).strip()
 
     if video_type == "short":
 
@@ -1501,43 +1441,49 @@ def vtt_time_to_seconds(
 
     parts = value.split(":")
 
-    if len(parts) == 3:
+    try:
 
-        hours = float(
-            parts[0]
+        if len(parts) == 3:
+
+            hours = float(
+                parts[0]
+            )
+
+            minutes = float(
+                parts[1]
+            )
+
+            seconds = float(
+                parts[2]
+            )
+
+        elif len(parts) == 2:
+
+            hours = 0
+
+            minutes = float(
+                parts[0]
+            )
+
+            seconds = float(
+                parts[1]
+            )
+
+        else:
+
+            return 0.0
+
+        return (
+            hours * 3600
+            +
+            minutes * 60
+            +
+            seconds
         )
 
-        minutes = float(
-            parts[1]
-        )
-
-        seconds = float(
-            parts[2]
-        )
-
-    elif len(parts) == 2:
-
-        hours = 0
-
-        minutes = float(
-            parts[0]
-        )
-
-        seconds = float(
-            parts[1]
-        )
-
-    else:
+    except Exception:
 
         return 0.0
-
-    return (
-        hours * 3600
-        +
-        minutes * 60
-        +
-        seconds
-    )
 
 
 # ============================================================
@@ -1566,14 +1512,23 @@ def parse_vtt(
 
         return []
 
+    # Normalize line endings
+    text = text.replace(
+        "\r\n",
+        "\n"
+    ).replace(
+        "\r",
+        "\n"
+    )
+
     pattern = re.compile(
         r"(\d{1,2}:\d{2}:\d{2}\.\d{3}"
         r"|\d{1,2}:\d{2}\.\d{3})"
-        r"\s+-->\s+"
+        r"\s*-->\s*"
         r"(\d{1,2}:\d{2}:\d{2}\.\d{3}"
         r"|\d{1,2}:\d{2}\.\d{3})"
-        r"\s*\n"
-        r"(.+?)(?=\n\n|\Z)",
+        r"[^\n]*\n"
+        r"(.*?)(?=\n\s*\n|\Z)",
         re.DOTALL
     )
 
@@ -1651,6 +1606,11 @@ def create_fallback_timings(
 
         return []
 
+    duration = max(
+        0.1,
+        float(duration)
+    )
+
     chunks = []
 
     for i in range(
@@ -1659,20 +1619,20 @@ def create_fallback_timings(
         WORDS_PER_HIGHLIGHT
     ):
 
+        chunk_words = words[
+            i:i + WORDS_PER_HIGHLIGHT
+        ]
+
         chunk = " ".join(
-            words[
-                i:i +
-                WORDS_PER_HIGHLIGHT
-            ]
+            chunk_words
         )
 
         chunks.append(
             chunk
         )
 
-    total_words = max(
-        1,
-        len(words)
+    total_words = len(
+        words
     )
 
     timings = []
@@ -1691,18 +1651,26 @@ def create_fallback_timings(
             total_words
         )
 
+        end = min(
+            duration,
+            current +
+            chunk_duration
+        )
+
         timings.append(
             {
                 "start": current,
-                "end": (
-                    current +
-                    chunk_duration
-                ),
+                "end": end,
                 "text": chunk
             }
         )
 
-        current += chunk_duration
+        current = end
+
+    # Ensure final chunk reaches audio end
+    if timings:
+
+        timings[-1]["end"] = duration
 
     return timings
 
@@ -1716,24 +1684,59 @@ def get_text_timings(
     audio_path
 ):
 
-    audio = AudioSegment.from_file(
-        audio_path
-    )
+    try:
 
-    duration = (
-        len(audio) /
-        1000.0
-    )
+        audio = AudioSegment.from_file(
+            audio_path
+        )
 
-    timing_path = Path(
-        audio_path
-    ).with_suffix(
-        ".timing.vtt"
-    )
+        duration = (
+            len(audio) /
+            1000.0
+        )
 
-    timings = parse_vtt(
-        timing_path
-    )
+    except Exception as e:
+
+        print(
+            f"⚠️ Could not read audio "
+            f"duration: {e}"
+        )
+
+        duration = 1.0
+
+    timing_candidates = [
+
+        Path(audio_path).with_suffix(
+            ".timing.vtt"
+        ),
+
+        Path(audio_path).with_suffix(
+            ".vtt"
+        ),
+    ]
+
+    timings = []
+
+    for timing_path in timing_candidates:
+
+        if timing_path.exists():
+
+            timings = parse_vtt(
+                timing_path
+            )
+
+            if timings:
+
+                print(
+                    f"✅ VTT timing loaded: "
+                    f"{timing_path}"
+                )
+
+                break
+
+    # --------------------------------------------------------
+    # VTT fallback
+    # --------------------------------------------------------
 
     if not timings:
 
@@ -1745,7 +1748,7 @@ def get_text_timings(
             "🔄 Using estimated speech timing."
         )
 
-        return create_fallback_timings(
+        timings = create_fallback_timings(
             script,
             duration
         )
@@ -1757,7 +1760,10 @@ def get_text_timings(
         text = re.sub(
             r"\s+",
             " ",
-            item["text"]
+            item.get(
+                "text",
+                ""
+            )
         ).strip()
 
         if not text:
@@ -1765,13 +1771,23 @@ def get_text_timings(
             continue
 
         start = max(
-            0,
-            item["start"]
+            0.0,
+            float(
+                item.get(
+                    "start",
+                    0
+                )
+            )
         )
 
         end = min(
             duration,
-            item["end"]
+            float(
+                item.get(
+                    "end",
+                    duration
+                )
+            )
         )
 
         if end <= start:
@@ -1786,12 +1802,26 @@ def get_text_timings(
             }
         )
 
+    # --------------------------------------------------------
+    # Ultimate fallback
+    # --------------------------------------------------------
+
     if not cleaned:
 
-        return create_fallback_timings(
+        print(
+            "⚠️ Timing parser produced "
+            "no chunks."
+        )
+
+        cleaned = create_fallback_timings(
             script,
             duration
         )
+
+    print(
+        f"📝 Final timing chunks: "
+        f"{len(cleaned)}"
+    )
 
     return cleaned
 
@@ -1819,7 +1849,23 @@ def get_current_timing(
 
             return item
 
-    return None
+    # --------------------------------------------------------
+    # If between chunks, use nearest previous chunk
+    # --------------------------------------------------------
+
+    previous = None
+
+    for item in timings:
+
+        if item["start"] <= current_time:
+
+            previous = item
+
+        else:
+
+            break
+
+    return previous
 
 
 # ============================================================
@@ -1884,9 +1930,20 @@ def make_animated_frame(
 
     if current is None:
 
-        return frame
+        return frame.convert(
+            "RGB"
+        )
 
-    text = current["text"]
+    text = current.get(
+        "text",
+        ""
+    )
+
+    if not text:
+
+        return frame.convert(
+            "RGB"
+        )
 
     # --------------------------------------------------------
     # Animation progress
@@ -1906,24 +1963,20 @@ def make_animated_frame(
         )
     )
 
-    # Cubic ease out
     eased = (
         1 -
         (1 - progress) ** 3
     )
 
-    # Scale
     scale = (
         0.88 +
         0.12 * eased
     )
 
-    # Opacity
     alpha = int(
         255 * eased
     )
 
-    # Slight vertical movement
     movement = int(
         20 *
         (1 - eased)
@@ -1940,6 +1993,12 @@ def make_animated_frame(
         max_width
     )
 
+    if not lines:
+
+        return frame.convert(
+            "RGB"
+        )
+
     total_height = (
         len(lines) *
         line_height
@@ -1947,8 +2006,7 @@ def make_animated_frame(
 
     start_y = (
         text_center_y -
-        total_height // 2
-        +
+        total_height // 2 +
         movement
     )
 
@@ -1994,10 +2052,6 @@ def make_animated_frame(
             text_width
         ) // 2
 
-        # ----------------------------------------------------
-        # Highlight box
-        # ----------------------------------------------------
-
         padding_x = 28
         padding_y = 14
 
@@ -2024,10 +2078,6 @@ def make_animated_frame(
                 )
             )
         )
-
-        # ----------------------------------------------------
-        # Text
-        # ----------------------------------------------------
 
         overlay_draw.text(
             (
@@ -2061,14 +2111,14 @@ def make_animated_frame(
         scale - 1.0
     ) > 0.001:
 
-        new_width = int(
-            width *
-            scale
+        new_width = max(
+            1,
+            int(width * scale)
         )
 
-        new_height = int(
-            height *
-            scale
+        new_height = max(
+            1,
+            int(height * scale)
         )
 
         scaled = overlay.resize(
@@ -2124,6 +2174,59 @@ def make_animated_frame(
 
 
 # ============================================================
+# SAFE NUMPY FRAME CONVERSION
+# ============================================================
+
+def pil_to_numpy_frame(
+    image
+):
+    """
+    MoviePy VideoClip.make_frame MUST return
+    a NumPy ndarray.
+
+    This fixes:
+
+        AttributeError: shape
+    """
+
+    if not isinstance(
+        image,
+        Image.Image
+    ):
+
+        image = Image.fromarray(
+            np.asarray(image)
+        )
+
+    image = image.convert(
+        "RGB"
+    )
+
+    array = np.asarray(
+        image,
+        dtype=np.uint8
+    )
+
+    # Make absolutely sure shape is H x W x 3
+    if array.ndim != 3:
+
+        raise ValueError(
+            f"Invalid video frame shape: "
+            f"{array.shape}"
+        )
+
+    if array.shape[2] != 3:
+
+        raise ValueError(
+            f"Video frame must have "
+            f"3 channels, got: "
+            f"{array.shape}"
+        )
+
+    return array
+
+
+# ============================================================
 # CREATE VIDEO
 # ============================================================
 
@@ -2134,15 +2237,6 @@ def create_video(
     video_type,
     slide_scripts=None
 ):
-    """
-    Create final video.
-
-    slide_scripts:
-        Spoken script for each slide.
-
-    Text timing is generated from Edge TTS VTT
-    whenever available.
-    """
 
     if not slide_paths:
 
@@ -2205,7 +2299,7 @@ def create_video(
     voice_audio_clips = []
 
     # ========================================================
-    # PROCESS EACH SLIDE
+    # PROCESS SLIDES
     # ========================================================
 
     for index, (
@@ -2234,11 +2328,10 @@ def create_video(
             str(audio_path)
         )
 
-        audio_duration = (
+        audio_duration = float(
             audio.duration
         )
 
-        # Small breathing room
         duration = (
             audio_duration +
             0.45
@@ -2253,6 +2346,22 @@ def create_video(
         ).convert(
             "RGB"
         )
+
+        # Force correct dimensions
+        expected_size = (
+            SHORT_WIDTH,
+            SHORT_HEIGHT
+        ) if video_type == "short" else (
+            LONG_WIDTH,
+            LONG_HEIGHT
+        )
+
+        if base_image.size != expected_size:
+
+            base_image = base_image.resize(
+                expected_size,
+                Image.Resampling.LANCZOS
+            )
 
         # ----------------------------------------------------
         # Text timings
@@ -2276,26 +2385,51 @@ def create_video(
             t,
             base=base_image.copy(),
             timing_data=timings,
-            vt=video_type
+            vt=video_type,
+            audio_len=audio_duration
         ):
 
-            if t >= audio_duration:
+            if t >= audio_len:
 
                 local_time = max(
-                    0,
-                    audio_duration -
+                    0.0,
+                    audio_len -
                     0.05
                 )
 
             else:
 
-                local_time = t
+                local_time = max(
+                    0.0,
+                    float(t)
+                )
 
-            return make_animated_frame(
+            # Create PIL frame
+            pil_frame = make_animated_frame(
                 base,
                 timing_data,
                 local_time,
                 vt
+            )
+
+            # =================================================
+            # CRITICAL FIX
+            # =================================================
+            #
+            # MoviePy requires NumPy ndarray here.
+            #
+            # Old:
+            #
+            # return pil_frame
+            #
+            # New:
+            #
+            # return np.ndarray
+            #
+            # =================================================
+
+            return pil_to_numpy_frame(
+                pil_frame
             )
 
         # ----------------------------------------------------
@@ -2365,17 +2499,13 @@ def create_video(
                 "🎵 Adding background music..."
             )
 
-            original_music = (
-                AudioFileClip(
-                    str(MUSIC_PATH)
-                )
+            original_music = AudioFileClip(
+                str(MUSIC_PATH)
             )
 
             remaining = (
                 final_video.duration
             )
-
-            current = 0
 
             while remaining > 0:
 
@@ -2403,10 +2533,6 @@ def create_video(
                     segment.duration
                 )
 
-                current += (
-                    segment.duration
-                )
-
             if music_parts:
 
                 if len(music_parts) == 1:
@@ -2415,10 +2541,8 @@ def create_video(
 
                 else:
 
-                    music = (
-                        concatenate_audioclips(
-                            music_parts
-                        )
+                    music = concatenate_audioclips(
+                        music_parts
                     )
 
                 audio_layers.append(
