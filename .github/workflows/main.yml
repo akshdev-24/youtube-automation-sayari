@@ -1,194 +1,286 @@
-name: Autonomous AI Course Generator
+# ============================================================
+# FILE: .github/workflows/main.yml
+# HINGLISH SHAYARI SHORTS AUTOMATION
+# ============================================================
+
+name: Hinglish Shayari Shorts Factory
 
 on:
+  # 09:00 AM IST = 03:30 UTC
+  # 02:00 PM IST = 08:30 UTC
   schedule:
-    - cron: '0 7 * * *'
+    - cron: "30 3 * * *"
+    - cron: "30 8 * * *"
+
+  # Manual run from GitHub Actions
   workflow_dispatch:
 
+# Prevent two uploads from running at the same time.
 concurrency:
-  group: ${{ github.workflow }}
+  group: shayari-production
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
+
 jobs:
-  build-and-deploy:
+
+  build-and-upload:
+
+    name: Generate & Upload Shayari Short
+
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+    timeout-minutes: 30
 
     steps:
-      - name: ⬇️ Checkout repository
-        uses: actions/checkout@v4
 
-      - name: 🐍 Set up Python
+      # ======================================================
+      # 1. CHECKOUT REPOSITORY
+      # ======================================================
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      # ======================================================
+      # 2. SETUP PYTHON
+      # ======================================================
+
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: pip
 
-      # ==========================================
-      # SYSTEM DEPENDENCIES
-      # ==========================================
 
-      - name: 🧰 Install system dependencies
+      # ======================================================
+      # 3. INSTALL FFMPEG
+      # ======================================================
+
+      - name: 🎬 Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y imagemagick ffmpeg fonts-noto-core
+          sudo apt-get install -y ffmpeg
 
-          echo "🔎 Finding ImageMagick policy.xml..."
 
-          POLICY_FILE=$(find /etc -name "policy.xml" 2>/dev/null | grep -i "ImageMagick" | head -n 1)
+      # ======================================================
+      # 4. INSTALL FONTS
+      # ======================================================
 
-          if [ -z "$POLICY_FILE" ]; then
-            echo "❌ CRITICAL: Could not find ImageMagick policy.xml!"
-            exit 1
-          fi
+      - name: 🔤 Install fonts
+        run: |
+          sudo apt-get install -y fonts-noto-core
+          sudo apt-get install -y fonts-noto-extra
 
-          echo "✅ Found policy file at: $POLICY_FILE"
 
-          echo "🔧 Applying ImageMagick limits..."
+      # ======================================================
+      # 5. INSTALL PYTHON DEPENDENCIES
+      # ======================================================
 
-          sudo sed -i 's/<policy domain="resource" name="width" value=".*"\/>/<policy domain="resource" name="width" value="16384"\/>/' "$POLICY_FILE"
-
-          sudo sed -i 's/<policy domain="resource" name="height" value=".*"\/>/<policy domain="resource" name="height" value="16384"\/>/' "$POLICY_FILE"
-
-          echo "✅ ImageMagick configuration updated."
-
-      # ==========================================
-      # PYTHON DEPENDENCIES
-      # ==========================================
-
-      - name: 📦 Install Python dependencies
+      - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          echo "✅ Python dependencies installed."
 
-      # ==========================================
-      # GOOGLE / API CREDENTIALS
-      # ==========================================
 
-      - name: 🔑 Restore API credentials from base64
+      # ======================================================
+      # 6. RESTORE YOUTUBE OAUTH FILES
+      # ======================================================
+      #
+      # GitHub Secrets required:
+      #
+      # CLIENT_SECRET_B64
+      # CREDENTIALS_B64
+      #
+      # These contain base64 encoded JSON files.
+      #
+      # client_secrets.json
+      # credentials.json
+      #
+      # ======================================================
+
+      - name: 🔐 Restore YouTube OAuth files
         env:
           CLIENT_SECRET_B64: ${{ secrets.CLIENT_SECRET_B64 }}
           CREDENTIALS_B64: ${{ secrets.CREDENTIALS_B64 }}
         run: |
-          echo "$CLIENT_SECRET_B64" | base64 -d > client_secrets.json
-          echo "$CREDENTIALS_B64" | base64 -d > credentials.json
 
-          echo "✅ Google credential files restored."
+          set -e
 
-      # ==========================================
-      # RUN AUTOMATION
-      # ==========================================
+          if [ -z "$CLIENT_SECRET_B64" ]; then
+            echo "❌ CLIENT_SECRET_B64 secret is missing."
+            exit 1
+          fi
 
-      - name: 🚀 Run Autonomous Production Pipeline
-        id: production-run
-        env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          if [ -z "$CREDENTIALS_B64" ]; then
+            echo "❌ CREDENTIALS_B64 secret is missing."
+            exit 1
+          fi
+
+          echo "$CLIENT_SECRET_B64" | base64 --decode > client_secrets.json
+          echo "$CREDENTIALS_B64" | base64 --decode > credentials.json
+
+          chmod 600 client_secrets.json
+          chmod 600 credentials.json
+
+          echo "✅ YouTube OAuth files restored."
+
+
+      # ======================================================
+      # 7. CHECK ASSETS
+      # ======================================================
+
+      - name: 🎨 Check assets
         run: |
+
+          echo "Checking assets..."
+
+          if [ ! -d "assets" ]; then
+            echo "❌ assets folder missing."
+            exit 1
+          fi
+
+          echo ""
+          echo "📁 Assets:"
+          find assets -maxdepth 2 -type f | sort
+
+          echo ""
+
+          if [ ! -f "assets/fallback.jpg" ]; then
+            echo "⚠️ assets/fallback.jpg not found."
+            echo "The video generator may fail if no background exists."
+          fi
+
+          if [ -d "assets/music" ]; then
+            echo "🎵 Music files:"
+            find assets/music -type f | sort
+          else
+            echo "⚠️ assets/music folder not found."
+          fi
+
+
+      # ======================================================
+      # 8. GENERATE + UPLOAD
+      # ======================================================
+
+      - name: 🤖 Generate Shayari + 🎬 Create Video + 📤 Upload
+        env:
+
+          # Gemini
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+
+          # YouTube
+          YOUTUBE_UPLOAD: "true"
+
+          # Gemini model
+          GEMINI_MODEL: "gemini-3.6-flash"
+
+          # Video
+          SHAYARI_DURATION: "15"
+
+          # Pipeline retry
+          PIPELINE_RETRIES: "2"
+
+          # YouTube settings
+          YOUTUBE_PRIVACY_STATUS: "public"
+          YOUTUBE_CATEGORY_ID: "22"
+
+          # Upload retry
+          YOUTUBE_UPLOAD_RETRIES: "3"
+          YOUTUBE_RETRY_DELAY: "10"
+
+        run: |
+
+          set -e
+
+          echo "=================================================="
+          echo "💔 HINGLISH SHAYARI SHORTS FACTORY"
+          echo "=================================================="
+
+          echo ""
+          echo "🕐 UTC time:"
+          date -u
+
+          echo ""
+          echo "🕐 IST time:"
+          TZ=Asia/Kolkata date
+
+          echo ""
+          echo "🤖 Starting automation..."
+
           python main.py
 
-      # ==========================================
-      # DEBUG AUDIO
-      # ==========================================
 
-      - name: 🔎 Upload Audio Artifact for Debugging
+      # ======================================================
+      # 9. SHOW OUTPUT FILES
+      # ======================================================
+
+      - name: 📂 List generated files
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: audio-debug-files
-          path: output/*.wav
-          if-no-files-found: ignore
-
-      # ==========================================
-      # DEBUG VIDEOS
-      # ==========================================
-
-      - name: 🎥 Upload Final Video for Debugging
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: final-videos
-          path: output/*.mp4
-          if-no-files-found: ignore
-
-      # ==========================================
-      # DEMO GIF
-      # ==========================================
-
-      - name: 🎞️ Generate demo GIF from latest video
-        if: steps.production-run.outcome == 'success'
         run: |
-          mkdir -p images
 
-          VIDEO=$(ls output/long_video_*.mp4 2>/dev/null | head -n 1)
+          echo "=================================================="
+          echo "GENERATED FILES"
+          echo "=================================================="
 
-          if [ -n "$VIDEO" ]; then
-            echo "✅ Found video: $VIDEO"
-            echo "🎞️ Converting first 12 seconds to GIF..."
-
-            ffmpeg -y \
-              -ss 0 \
-              -t 12 \
-              -i "$VIDEO" \
-              -filter_complex "[0:v]fps=8,scale=320:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" \
-              images/demo.gif
-
-            echo "✅ Demo GIF created."
+          if [ -d "output" ]; then
+            find output -maxdepth 2 -type f -printf "%p - %s bytes\n" | sort
           else
-            echo "⚠️ No long video found. Skipping GIF."
+            echo "No output directory found."
           fi
 
-      # ==========================================
-      # COMMIT GENERATED DATA
-      # ==========================================
 
-      - name: 💾 Commit and push content plan and demo GIF
-        if: steps.production-run.outcome == 'success'
+      # ======================================================
+      # 10. SAVE VIDEO AS GITHUB ARTIFACT
+      # ======================================================
+
+      - name: 📦 Upload generated video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shayari-short-${{ github.run_number }}
+          path: |
+            output/*.mp4
+            output/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+
+      # ======================================================
+      # 11. UPDATE CONTENT HISTORY
+      # ======================================================
+
+      - name: 💾 Commit content history
+        if: success()
         run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-          STAGING=$(mktemp -d)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          cp content_plan.json "$STAGING/"
+          git add content_history.json
 
-          if [ -f images/demo.gif ]; then
-            cp images/demo.gif "$STAGING/"
+          if git diff --cached --quiet; then
+            echo "ℹ️ No content history changes."
+          else
+            git commit -m "chore: update shayari content history"
+            git push
+            echo "✅ Content history committed."
           fi
 
-          for attempt in 1 2 3; do
 
-            echo "🔄 Push attempt $attempt..."
+      # ======================================================
+      # 12. CLEAN OAUTH FILES
+      # ======================================================
 
-            git fetch origin main
-            git reset --hard origin/main
+      - name: 🧹 Cleanup secrets
+        if: always()
+        run: |
 
-            cp "$STAGING/content_plan.json" content_plan.json
+          rm -f client_secrets.json
+          rm -f credentials.json
 
-            if [ -f "$STAGING/demo.gif" ]; then
-              mkdir -p images
-              cp "$STAGING/demo.gif" images/demo.gif
-            fi
-
-            git add content_plan.json images/demo.gif
-
-            if git diff --cached --quiet; then
-              echo "✅ Nothing to commit."
-              exit 0
-            fi
-
-            git commit -m "feat: Update content plan and demo GIF after video production"
-
-            if git push; then
-              echo "✅ Successfully pushed on attempt $attempt."
-              exit 0
-            fi
-
-            echo "⚠️ Push rejected. Retrying..."
-          done
-
-          echo "❌ Could not push after 3 attempts."
-          exit 1
+          echo "🧹 OAuth files removed."
