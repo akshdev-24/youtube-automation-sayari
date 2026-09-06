@@ -118,7 +118,7 @@ def generate_curriculum(previous_titles=None):
             formatted = "\n".join([f"{i+1}. {t}" for i, t in enumerate(previous_titles)])
             history = f"The following lessons have already been created:\n{formatted}\n\nPlease continue from where this series left off.\n"
 
-        prompt = f"""
+                prompt = f"""
         You are an expert AI educator. Generate a curriculum for a YouTube series called 'AI for Developers by {YOUR_NAME}'.
         {history}
         The style must be: 'Assume the viewer is a beginner or non-technical person starting their journey into AI as a developer.
@@ -130,7 +130,11 @@ def generate_curriculum(previous_titles=None):
         Respond with ONLY a valid JSON object. The object must contain a key "lessons" which is a list of 20 lesson objects.
         Each lesson object must have these keys: "chapter", "part", "title", "status" (defaulted to "pending"), and "youtube_id" (defaulted to null).
         """
-       response = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
+
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=prompt
+        )
         json_string = response.text.strip().replace("```json", "").replace("```", "")
         curriculum = json.loads(json_string)
         print("✅ New curriculum generated successfully!")
@@ -157,7 +161,11 @@ def generate_lesson_content(lesson_title):
 
         Return only valid JSON.
         """
-           response = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
+
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=prompt
+        )
         json_string = response.text.strip().replace("```json", "").replace("```", "")
         content = json.loads(json_string)
         print("✅ Lesson content generated successfully.")
@@ -165,8 +173,7 @@ def generate_lesson_content(lesson_title):
     except Exception as e:
         print(f"❌ ERROR: Failed to generate lesson content: {e}")
         raise
-
-
+        
 # def generate_visuals(output_dir, video_type, slide_content=None, thumbnail_title=None, slide_number=0, total_slides=0):
 #     """Generates a single professional, PPT-style slide or a thumbnail."""
 #     output_dir.mkdir(exist_ok=True, parents=True)
