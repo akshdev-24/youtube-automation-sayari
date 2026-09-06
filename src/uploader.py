@@ -1,23 +1,20 @@
-# FILE: src/uploader.py
 # ============================================================
-# HINDI MOTIVATION YOUTUBE AUTOMATION UPLOADER
+# FILE: src/uploader.py
+# HINGLISH SHAYARI - YOUTUBE SHORTS UPLOADER
 # ============================================================
 #
 # Features:
-# - YouTube OAuth2 authentication
-# - GitHub Actions compatible
-# - Automatic token refresh
-# - Hindi title support
-# - Hindi description support
-# - SEO tag cleaning
-# - YouTube 500-character tag limit
-# - Long video upload
-# - YouTube Shorts upload
-# - Custom thumbnail upload
-# - PNG / JPG / JPEG MIME detection
-# - Thumbnail validation
-# - Upload progress
-# - Robust error handling
+#   ✅ YouTube OAuth2
+#   ✅ GitHub Actions compatible
+#   ✅ Automatic token refresh
+#   ✅ Hinglish / Roman Hindi metadata
+#   ✅ YouTube Shorts upload
+#   ✅ SEO tag cleaning
+#   ✅ 500-character tag protection
+#   ✅ Upload retry
+#   ✅ Upload progress
+#   ✅ Optional custom thumbnail
+#   ✅ No voice/TTS related code
 #
 # ============================================================
 
@@ -35,61 +32,53 @@ from googleapiclient.http import MediaFileUpload
 
 
 # ============================================================
-# CONFIGURATION
+# PATH CONFIG
 # ============================================================
 
-CLIENT_SECRETS_FILE = Path("client_secrets.json")
-CREDENTIALS_FILE = Path("credentials.json")
+ROOT_DIR = Path(__file__).resolve().parent.parent
 
-# ------------------------------------------------------------
-# YouTube OAuth scope
-# ------------------------------------------------------------
+CLIENT_SECRETS_FILE = ROOT_DIR / "client_secrets.json"
+
+CREDENTIALS_FILE = ROOT_DIR / "credentials.json"
+
+
+# ============================================================
+# YOUTUBE CONFIG
+# ============================================================
 
 YOUTUBE_UPLOAD_SCOPE = [
     "https://www.googleapis.com/auth/youtube.upload"
 ]
 
-# ------------------------------------------------------------
-# YouTube category
-#
 # 22 = People & Blogs
-# Suitable for:
-# - Motivation
-# - Lifestyle
-# - Personal development
-# ------------------------------------------------------------
+YOUTUBE_CATEGORY_ID = os.getenv(
+    "YOUTUBE_CATEGORY_ID",
+    "22"
+)
 
-YOUTUBE_CATEGORY_ID = "22"
-
-# ------------------------------------------------------------
-# Upload privacy
-#
 # public / private / unlisted
-# ------------------------------------------------------------
-
-YOUTUBE_PRIVACY_STATUS = "public"
-
-# ------------------------------------------------------------
-# Retry configuration
-# ------------------------------------------------------------
-
-UPLOAD_RETRIES = 3
-RETRY_DELAY_SECONDS = 10
-
-# ------------------------------------------------------------
-# YouTube title maximum
-# ------------------------------------------------------------
+YOUTUBE_PRIVACY_STATUS = os.getenv(
+    "YOUTUBE_PRIVACY_STATUS",
+    "public"
+)
 
 MAX_TITLE_LENGTH = 100
 
-# ------------------------------------------------------------
-# YouTube tags maximum total characters
-#
-# YouTube allows approximately 500 characters.
-# Keep a safe margin.
-# ------------------------------------------------------------
-
 MAX_TAG_CHARACTERS = 480
+
+UPLOAD_RETRIES = int(
+    os.getenv(
+        "YOUTUBE_UPLOAD_RETRIES",
+        "3"
+    )
+)
+
+RETRY_DELAY_SECONDS = int(
+    os.getenv(
+        "YOUTUBE_RETRY_DELAY",
+        "10"
+    )
+)
 
 
 # ============================================================
@@ -97,35 +86,23 @@ MAX_TAG_CHARACTERS = 480
 # ============================================================
 
 def get_authenticated_service():
-    """
-    Authenticate with YouTube.
 
-    GitHub Actions:
-        Uses credentials.json restored from
-        CREDENTIALS_B64 secret.
-
-    Existing refresh token:
-        Automatically refreshes expired credentials.
-
-    First-time local authentication:
-        Opens OAuth browser flow.
-    """
-
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 70)
     print("🔐 YOUTUBE AUTHENTICATION")
-    print("=" * 60)
+    print("=" * 70)
 
     credentials = None
 
-    # ========================================================
+    # --------------------------------------------------------
     # LOAD EXISTING CREDENTIALS
-    # ========================================================
+    # --------------------------------------------------------
 
     if CREDENTIALS_FILE.exists():
 
         print(
-            f"🔑 Found credentials file: "
-            f"{CREDENTIALS_FILE}"
+            f"🔑 Loading:"
+            f" {CREDENTIALS_FILE}"
         )
 
         try:
@@ -138,17 +115,17 @@ def get_authenticated_service():
             )
 
             print(
-                "✅ Existing YouTube credentials loaded."
+                "✅ Credentials loaded."
             )
 
-        except Exception as e:
+        except Exception as error:
 
             print(
-                "⚠️ Could not load existing credentials:"
+                "⚠️ Could not load credentials."
             )
 
             print(
-                f"   {e}"
+                f"   {error}"
             )
 
             credentials = None
@@ -159,9 +136,9 @@ def get_authenticated_service():
             "⚠️ credentials.json not found."
         )
 
-    # ========================================================
-    # VALID CREDENTIALS
-    # ========================================================
+    # --------------------------------------------------------
+    # VALID
+    # --------------------------------------------------------
 
     if credentials and credentials.valid:
 
@@ -169,9 +146,9 @@ def get_authenticated_service():
             "✅ YouTube credentials are valid."
         )
 
-    # ========================================================
-    # REFRESH EXPIRED CREDENTIALS
-    # ========================================================
+    # --------------------------------------------------------
+    # REFRESH
+    # --------------------------------------------------------
 
     elif (
         credentials
@@ -180,11 +157,11 @@ def get_authenticated_service():
     ):
 
         print(
-            "🔄 YouTube access token expired."
+            "🔄 Access token expired."
         )
 
         print(
-            "🔄 Refreshing access token..."
+            "🔄 Refreshing token..."
         )
 
         try:
@@ -194,45 +171,41 @@ def get_authenticated_service():
             )
 
             print(
-                "✅ Access token refreshed successfully."
+                "✅ Token refreshed."
             )
 
-        except Exception as e:
+        except Exception as error:
 
             print(
                 "❌ Token refresh failed."
             )
 
-            print(
-                f"   Error: {e}"
-            )
-
             raise RuntimeError(
-                "YouTube authentication refresh failed."
+                f"YouTube token refresh failed: {error}"
             )
 
-    # ========================================================
-    # FIRST-TIME AUTHENTICATION
-    # ========================================================
+    # --------------------------------------------------------
+    # FIRST TIME LOCAL AUTH
+    # --------------------------------------------------------
 
     else:
 
         print(
-            "🔐 No valid YouTube credentials found."
-        )
-
-        print(
-            "🌐 Starting OAuth authentication..."
+            "🔐 No valid credentials."
         )
 
         if not CLIENT_SECRETS_FILE.exists():
 
             raise FileNotFoundError(
-                "CRITICAL ERROR: "
-                f"{CLIENT_SECRETS_FILE} not found.\n"
-                "Make sure CLIENT_SECRET_B64 is configured "
-                "correctly in GitHub Secrets."
+                "\n❌ client_secrets.json not found.\n\n"
+                "For GitHub Actions make sure your workflow "
+                "creates client_secrets.json from your "
+                "CLIENT_SECRET_B64 secret.\n"
             )
+
+        print(
+            "🌐 Starting browser OAuth..."
+        )
 
         try:
 
@@ -249,55 +222,48 @@ def get_authenticated_service():
             )
 
             print(
-                "✅ OAuth authentication completed."
+                "✅ OAuth completed."
             )
 
-        except Exception as e:
+        except Exception as error:
 
             print(
-                "❌ OAuth authentication failed."
+                "❌ OAuth failed."
             )
 
-            print(
-                f"   Error: {e}"
+            raise RuntimeError(
+                f"YouTube OAuth failed: {error}"
             )
 
-            raise
-
-    # ========================================================
-    # SAVE UPDATED CREDENTIALS
-    # ========================================================
+    # --------------------------------------------------------
+    # SAVE
+    # --------------------------------------------------------
 
     try:
 
-        with open(
-            CREDENTIALS_FILE,
-            "w",
+        CREDENTIALS_FILE.write_text(
+            credentials.to_json(),
             encoding="utf-8"
-        ) as file:
-
-            file.write(
-                credentials.to_json()
-            )
+        )
 
         print(
-            f"💾 Credentials saved to:"
+            f"💾 Credentials saved:"
             f" {CREDENTIALS_FILE}"
         )
 
-    except Exception as e:
+    except Exception as error:
 
         print(
-            "⚠️ Could not save credentials:"
+            "⚠️ Could not save credentials."
         )
 
         print(
-            f"   {e}"
+            f"   {error}"
         )
 
-    # ========================================================
-    # BUILD YOUTUBE API SERVICE
-    # ========================================================
+    # --------------------------------------------------------
+    # BUILD API
+    # --------------------------------------------------------
 
     try:
 
@@ -309,55 +275,30 @@ def get_authenticated_service():
         )
 
         print(
-            "✅ YouTube API service initialized."
+            "✅ YouTube API ready."
         )
 
-    except Exception as e:
+        return youtube
 
-        print(
-            "❌ Could not initialize YouTube API."
+    except Exception as error:
+
+        raise RuntimeError(
+            f"Could not initialize YouTube API: {error}"
         )
-
-        print(
-            f"   Error: {e}"
-        )
-
-        raise
-
-    return youtube
 
 
 # ============================================================
-# TAG NORMALIZER
+# TAG CLEANER
 # ============================================================
 
 def normalize_tags(tags):
-    """
-    Normalize YouTube tags.
-
-    Accepts:
-        list
-        tuple
-        string
-
-    Example:
-
-        [
-            "hindi motivation",
-            "#motivation",
-            "Hindi Motivation"
-        ]
-
-    Returns:
-        Clean unique list.
-    """
 
     if not tags:
 
         return []
 
     # --------------------------------------------------------
-    # LIST / TUPLE
+    # INPUT LIST
     # --------------------------------------------------------
 
     if isinstance(
@@ -368,7 +309,7 @@ def normalize_tags(tags):
         raw_tags = list(tags)
 
     # --------------------------------------------------------
-    # STRING
+    # INPUT STRING
     # --------------------------------------------------------
 
     elif isinstance(
@@ -378,23 +319,17 @@ def normalize_tags(tags):
 
         raw_tags = tags.split(",")
 
-    # --------------------------------------------------------
-    # OTHER
-    # --------------------------------------------------------
-
     else:
 
         raw_tags = [
             str(tags)
         ]
 
-    cleaned_tags = []
+    cleaned = []
 
     seen = set()
 
-    # ========================================================
-    # CLEAN EACH TAG
-    # ========================================================
+    total_length = 0
 
     for tag in raw_tags:
 
@@ -402,113 +337,61 @@ def normalize_tags(tags):
             tag
         ).strip()
 
-        # Remove hashtag
+        # Remove # from YouTube tags
         tag = tag.lstrip(
             "#"
-        ).strip()
+        )
 
-        # Remove unnecessary whitespace
+        # Normalize spaces
         tag = " ".join(
             tag.split()
         )
 
-        # Skip empty
         if not tag:
 
             continue
 
-        # Prevent very long individual tags
-        if len(tag) > 100:
+        # Maximum individual tag
+        tag = tag[:100].strip()
 
-            tag = tag[:100].strip()
+        key = tag.lower()
 
-        normalized_key = tag.lower()
-
-        # Duplicate protection
-        if normalized_key in seen:
+        # Duplicate
+        if key in seen:
 
             continue
 
         seen.add(
-            normalized_key
+            key
         )
 
-        cleaned_tags.append(
-            tag
-        )
-
-    # ========================================================
-    # YOUTUBE TOTAL TAG LIMIT
-    # ========================================================
-
-    final_tags = []
-
-    total_length = 0
-
-    for tag in cleaned_tags:
-
-        additional_length = (
+        extra_length = (
             len(tag)
-            + (1 if final_tags else 0)
+            + (
+                1
+                if cleaned
+                else 0
+            )
         )
 
+        # YouTube total tag limit
         if (
             total_length
-            + additional_length
+            + extra_length
             > MAX_TAG_CHARACTERS
         ):
 
             break
 
-        final_tags.append(
+        cleaned.append(
             tag
         )
 
         total_length += (
-            additional_length
+            extra_length
         )
 
-    return final_tags
-
-
-# ============================================================
-# DESCRIPTION CLEANER
-# ============================================================
-
-def clean_description(description):
-    """
-    Clean YouTube description while
-    preserving Hindi Unicode.
-    """
-
-    if not description:
-
-        return ""
-
-    description = str(
-        description
-    ).strip()
-
-    # Normalize Windows line endings
-    description = description.replace(
-        "\r\n",
-        "\n"
-    )
-
-    description = description.replace(
-        "\r",
-        "\n"
-    )
-
-    # Prevent excessive blank lines
-    while "\n\n\n" in description:
-
-        description = description.replace(
-            "\n\n\n",
-            "\n\n"
-        )
-
-    return description
+    return cleaned
 
 
 # ============================================================
@@ -516,15 +399,11 @@ def clean_description(description):
 # ============================================================
 
 def clean_title(title):
-    """
-    Clean YouTube title.
-    """
 
     if not title:
 
-        return (
-            "Hindi Motivation | "
-            "जिंदगी बदलने वाली बातें"
+        title = (
+            "Hinglish Shayari"
         )
 
     title = str(
@@ -536,13 +415,32 @@ def clean_title(title):
         title.split()
     )
 
-    # YouTube title limit
+    # Keep #Shorts
+    if "#shorts" not in title.lower():
+
+        suffix = " #Shorts"
+
+        max_length = (
+            MAX_TITLE_LENGTH
+            - len(suffix)
+        )
+
+        title = (
+            title[
+                :max_length
+            ]
+            .rstrip()
+            + suffix
+        )
+
+    # Final protection
     if len(title) > MAX_TITLE_LENGTH:
 
         title = (
             title[
                 :MAX_TITLE_LENGTH - 3
-            ].rstrip()
+            ]
+            .rstrip()
             + "..."
         )
 
@@ -550,18 +448,138 @@ def clean_title(title):
 
 
 # ============================================================
+# DESCRIPTION CLEANER
+# ============================================================
+
+def clean_description(
+    description
+):
+
+    if not description:
+
+        description = ""
+
+    description = str(
+        description
+    ).strip()
+
+    # Normalize line endings
+    description = description.replace(
+        "\r\n",
+        "\n"
+    )
+
+    description = description.replace(
+        "\r",
+        "\n"
+    )
+
+    # Remove excessive blank lines
+    while "\n\n\n" in description:
+
+        description = description.replace(
+            "\n\n\n",
+            "\n\n"
+        )
+
+    # Ensure Shorts hashtag
+    if "#shorts" not in description.lower():
+
+        if description:
+
+            description += (
+                "\n\n#Shorts"
+            )
+
+        else:
+
+            description = "#Shorts"
+
+    return description
+
+
+# ============================================================
+# VIDEO VALIDATION
+# ============================================================
+
+def validate_video(
+    video_path
+):
+
+    path = Path(
+        video_path
+    )
+
+    # --------------------------------------------------------
+    # EXISTENCE
+    # --------------------------------------------------------
+
+    if not path.exists():
+
+        raise FileNotFoundError(
+            f"Video not found:\n{path}"
+        )
+
+    # --------------------------------------------------------
+    # FILE
+    # --------------------------------------------------------
+
+    if not path.is_file():
+
+        raise ValueError(
+            f"Video path is not a file:\n{path}"
+        )
+
+    # --------------------------------------------------------
+    # SIZE
+    # --------------------------------------------------------
+
+    size = path.stat().st_size
+
+    if size < 1024:
+
+        raise ValueError(
+            "Video file is empty or invalid."
+        )
+
+    # --------------------------------------------------------
+    # FORMAT
+    # --------------------------------------------------------
+
+    if path.suffix.lower() != ".mp4":
+
+        print(
+            "⚠️ Warning:"
+            " video is not .mp4"
+        )
+
+    size_mb = (
+        size
+        / (
+            1024 * 1024
+        )
+    )
+
+    print(
+        f"🎬 Video:"
+        f" {path.name}"
+    )
+
+    print(
+        f"📦 Size:"
+        f" {size_mb:.2f} MB"
+    )
+
+    return True
+
+
+# ============================================================
 # THUMBNAIL VALIDATION
 # ============================================================
 
-def validate_thumbnail(thumbnail_path):
-    """
-    Validate custom thumbnail.
-
-    Supported:
-        PNG
-        JPG
-        JPEG
-    """
+def validate_thumbnail(
+    thumbnail_path
+):
 
     if not thumbnail_path:
 
@@ -570,10 +588,6 @@ def validate_thumbnail(thumbnail_path):
     path = Path(
         thumbnail_path
     )
-
-    # --------------------------------------------------------
-    # Exists?
-    # --------------------------------------------------------
 
     if not path.exists():
 
@@ -584,64 +598,42 @@ def validate_thumbnail(thumbnail_path):
 
         return False
 
-    # --------------------------------------------------------
-    # Is file?
-    # --------------------------------------------------------
-
     if not path.is_file():
 
         print(
-            f"⚠️ Thumbnail path is not a file:"
-            f" {path}"
+            "⚠️ Thumbnail path is not a file."
         )
 
         return False
 
-    # --------------------------------------------------------
-    # File size
-    # --------------------------------------------------------
-
-    file_size = path.stat().st_size
-
-    if file_size < 1024:
-
-        print(
-            "⚠️ Thumbnail file is too small:"
-            f" {file_size} bytes"
-        )
-
-        return False
-
-    # --------------------------------------------------------
-    # Extension
-    # --------------------------------------------------------
-
-    supported_extensions = {
+    supported = {
         ".jpg",
         ".jpeg",
         ".png"
     }
 
-    extension = (
-        path.suffix.lower()
-    )
-
-    if extension not in supported_extensions:
+    if path.suffix.lower() not in supported:
 
         print(
-            "⚠️ Unsupported thumbnail format:"
-            f" {extension}"
+            f"⚠️ Unsupported thumbnail:"
+            f" {path.suffix}"
         )
 
         return False
 
-    # --------------------------------------------------------
-    # Size warning
-    # --------------------------------------------------------
+    if path.stat().st_size < 1024:
+
+        print(
+            "⚠️ Thumbnail is too small."
+        )
+
+        return False
 
     size_mb = (
-        file_size
-        / (1024 * 1024)
+        path.stat().st_size
+        / (
+            1024 * 1024
+        )
     )
 
     print(
@@ -650,32 +642,26 @@ def validate_thumbnail(thumbnail_path):
     )
 
     print(
-        f"📦 Thumbnail size:"
+        f"📦 Size:"
         f" {size_mb:.2f} MB"
     )
 
     if size_mb > 2:
 
         print(
-            "⚠️ WARNING:"
-            " Thumbnail is larger than 2 MB."
-        )
-
-        print(
-            "   YouTube may reject the thumbnail."
+            "⚠️ Thumbnail is larger than 2 MB."
         )
 
     return True
 
 
 # ============================================================
-# THUMBNAIL MIME TYPE
+# THUMBNAIL MIME
 # ============================================================
 
-def get_thumbnail_mime_type(thumbnail_path):
-    """
-    Return correct MIME type based on extension.
-    """
+def get_thumbnail_mime_type(
+    thumbnail_path
+):
 
     extension = (
         Path(thumbnail_path)
@@ -683,22 +669,18 @@ def get_thumbnail_mime_type(thumbnail_path):
         .lower()
     )
 
-    mime_types = {
+    if extension in {
+        ".jpg",
+        ".jpeg"
+    }:
 
-        ".jpg":
-            "image/jpeg",
+        return "image/jpeg"
 
-        ".jpeg":
-            "image/jpeg",
+    if extension == ".png":
 
-        ".png":
-            "image/png"
-    }
+        return "image/png"
 
-    return mime_types.get(
-        extension,
-        "application/octet-stream"
-    )
+    return "application/octet-stream"
 
 
 # ============================================================
@@ -710,55 +692,27 @@ def upload_thumbnail(
     video_id,
     thumbnail_path
 ):
-    """
-    Upload custom thumbnail to YouTube.
-    """
 
-    print("\n" + "-" * 60)
-    print("🖼️ CUSTOM THUMBNAIL UPLOAD")
-    print("-" * 60)
-
-    # --------------------------------------------------------
-    # Validate
-    # --------------------------------------------------------
+    print()
+    print(
+        "🖼️ UPLOADING THUMBNAIL"
+    )
 
     if not validate_thumbnail(
         thumbnail_path
     ):
 
-        print(
-            "⚠️ Thumbnail upload skipped."
-        )
-
         return False
 
-    thumbnail_path = Path(
+    path = Path(
         thumbnail_path
     )
 
-    # --------------------------------------------------------
-    # MIME
-    # --------------------------------------------------------
-
     mime_type = (
         get_thumbnail_mime_type(
-            thumbnail_path
+            path
         )
     )
-
-    print(
-        f"📄 Format:"
-        f" {thumbnail_path.suffix.lower()}"
-    )
-
-    print(
-        f"📦 MIME:"
-        f" {mime_type}"
-    )
-
-    # ========================================================
-    # UPLOAD
-    # ========================================================
 
     for attempt in range(
         1,
@@ -767,158 +721,63 @@ def upload_thumbnail(
 
         try:
 
-            print(
-                f"📤 Thumbnail upload attempt "
-                f"{attempt}/{UPLOAD_RETRIES}"
-            )
+            media = MediaFileUpload(
 
-            thumbnail_media = (
-                MediaFileUpload(
-                    str(thumbnail_path),
-                    mimetype=mime_type,
-                    resumable=False
-                )
+                str(path),
+
+                mimetype=mime_type,
+
+                resumable=False
             )
 
             youtube.thumbnails().set(
+
                 videoId=video_id,
-                media_body=thumbnail_media
+
+                media_body=media
+
             ).execute()
 
             print(
-                "✅ Custom thumbnail uploaded!"
+                "✅ Thumbnail uploaded."
             )
 
             return True
 
-        except HttpError as e:
+        except HttpError as error:
 
             print(
-                "❌ YouTube thumbnail API error:"
+                f"❌ Thumbnail API error:"
+                f" {error}"
             )
+
+        except Exception as error:
 
             print(
-                f"   {e}"
+                f"❌ Thumbnail error:"
+                f" {error}"
             )
 
-            if attempt < UPLOAD_RETRIES:
-
-                print(
-                    f"🔄 Retrying in "
-                    f"{RETRY_DELAY_SECONDS} seconds..."
-                )
-
-                time.sleep(
-                    RETRY_DELAY_SECONDS
-                )
-
-        except Exception as e:
+        if attempt < UPLOAD_RETRIES:
 
             print(
-                "❌ Thumbnail upload failed:"
+                f"🔄 Retry in "
+                f"{RETRY_DELAY_SECONDS}s..."
             )
 
-            print(
-                f"   {e}"
+            time.sleep(
+                RETRY_DELAY_SECONDS
             )
-
-            if attempt < UPLOAD_RETRIES:
-
-                print(
-                    f"🔄 Retrying in "
-                    f"{RETRY_DELAY_SECONDS} seconds..."
-                )
-
-                time.sleep(
-                    RETRY_DELAY_SECONDS
-                )
 
     print(
-        "❌ Thumbnail upload failed after "
-        f"{UPLOAD_RETRIES} attempts."
+        "⚠️ Thumbnail upload failed."
     )
 
     return False
 
 
 # ============================================================
-# VIDEO VALIDATION
-# ============================================================
-
-def validate_video(video_path):
-    """
-    Validate video before upload.
-    """
-
-    path = Path(
-        video_path
-    )
-
-    # --------------------------------------------------------
-    # Exists
-    # --------------------------------------------------------
-
-    if not path.exists():
-
-        raise FileNotFoundError(
-            f"Video file not found:"
-            f" {path}"
-        )
-
-    # --------------------------------------------------------
-    # File
-    # --------------------------------------------------------
-
-    if not path.is_file():
-
-        raise ValueError(
-            f"Video path is not a file:"
-            f" {path}"
-        )
-
-    # --------------------------------------------------------
-    # Size
-    # --------------------------------------------------------
-
-    file_size = path.stat().st_size
-
-    if file_size < 1024:
-
-        raise ValueError(
-            "Video file appears to be empty."
-        )
-
-    # --------------------------------------------------------
-    # Extension
-    # --------------------------------------------------------
-
-    if path.suffix.lower() != ".mp4":
-
-        print(
-            "⚠️ Warning:"
-            f" Video extension is {path.suffix}"
-        )
-
-    size_mb = (
-        file_size
-        / (1024 * 1024)
-    )
-
-    print(
-        f"🎬 Video:"
-        f" {path.name}"
-    )
-
-    print(
-        f"📦 Video size:"
-        f" {size_mb:.2f} MB"
-    )
-
-    return True
-
-
-# ============================================================
-# VIDEO UPLOAD
+# UPLOAD VIDEO
 # ============================================================
 
 def upload_video_file(
@@ -928,20 +787,6 @@ def upload_video_file(
     description,
     tags
 ):
-    """
-    Upload video file to YouTube.
-
-    Returns:
-        video_id
-    """
-
-    video_path = Path(
-        video_path
-    )
-
-    # ========================================================
-    # REQUEST BODY
-    # ========================================================
 
     request_body = {
 
@@ -970,28 +815,21 @@ def upload_video_file(
         }
     }
 
-    # ========================================================
-    # MEDIA
-    # ========================================================
-
+    print()
     print(
-        "\n📦 Preparing video upload..."
+        "📦 Preparing YouTube upload..."
     )
 
     media = MediaFileUpload(
 
         str(video_path),
 
-        chunksize=-1,
+        mimetype="video/mp4",
 
-        resumable=True,
+        chunksize=1024 * 1024,
 
-        mimetype="video/mp4"
+        resumable=True
     )
-
-    # ========================================================
-    # API REQUEST
-    # ========================================================
 
     request = youtube.videos().insert(
 
@@ -1003,10 +841,6 @@ def upload_video_file(
     )
 
     response = None
-
-    # ========================================================
-    # UPLOAD LOOP
-    # ========================================================
 
     while response is None:
 
@@ -1022,13 +856,9 @@ def upload_video_file(
             )
 
             print(
-                f"📤 Upload progress:"
+                f"📤 Upload:"
                 f" {progress}%"
             )
-
-    # ========================================================
-    # VIDEO ID
-    # ========================================================
 
     video_id = response.get(
         "id"
@@ -1037,58 +867,40 @@ def upload_video_file(
     if not video_id:
 
         raise RuntimeError(
-            "YouTube upload completed but "
-            "no video ID was returned."
+            "YouTube returned no video ID."
         )
 
     return video_id
 
 
 # ============================================================
-# MAIN UPLOAD FUNCTION
+# MAIN YOUTUBE UPLOAD
 # ============================================================
 
 def upload_to_youtube(
     video_path,
     title,
-    description,
-    tags,
+    description="",
+    tags=None,
     thumbnail_path=None
 ):
-    """
-    Upload video to YouTube.
 
-    Supports:
-        - Hindi titles
-        - Hindi descriptions
-        - SEO tags
-        - Custom thumbnails
-        - GitHub Actions
-        - OAuth token refresh
-
-    Returns:
-        YouTube video ID
-    """
-
-    print("\n" + "=" * 70)
-    print("🚀 STARTING YOUTUBE UPLOAD")
+    print()
+    print("=" * 70)
+    print("🚀 YOUTUBE SHORTS UPLOAD")
     print("=" * 70)
 
-    # ========================================================
-    # VALIDATE VIDEO
-    # ========================================================
-
-    video_path = Path(
-        video_path
-    )
+    # --------------------------------------------------------
+    # VALIDATE
+    # --------------------------------------------------------
 
     validate_video(
         video_path
     )
 
-    # ========================================================
-    # CLEAN METADATA
-    # ========================================================
+    # --------------------------------------------------------
+    # METADATA
+    # --------------------------------------------------------
 
     title = clean_title(
         title
@@ -1098,55 +910,47 @@ def upload_to_youtube(
         description
     )
 
-    clean_tags = normalize_tags(
+    tags = normalize_tags(
         tags
     )
 
-    # ========================================================
-    # LOG METADATA
-    # ========================================================
-
-    print("\n📝 YOUTUBE METADATA")
-    print("-" * 60)
-
+    print()
     print(
-        f"TITLE:\n{title}"
+        "📝 TITLE:"
     )
 
     print(
-        f"\nTAGS:\n{clean_tags}"
+        title
+    )
+
+    print()
+    print(
+        "🏷️ TAGS:"
     )
 
     print(
-        f"\nTOTAL TAGS:"
-        f" {len(clean_tags)}"
+        ", ".join(tags)
     )
 
+    print()
     print(
-        f"\nDESCRIPTION LENGTH:"
-        f" {len(description)} characters"
+        f"🏷️ Tag characters:"
+        f" {sum(len(x) for x in tags) + max(len(tags)-1, 0)}"
     )
 
-    if thumbnail_path:
-
-        print(
-            f"\nTHUMBNAIL:"
-            f" {thumbnail_path}"
-        )
-
-    # ========================================================
-    # AUTHENTICATE
-    # ========================================================
+    # --------------------------------------------------------
+    # AUTH
+    # --------------------------------------------------------
 
     youtube = (
         get_authenticated_service()
     )
 
-    # ========================================================
-    # UPLOAD WITH RETRIES
-    # ========================================================
-
     video_id = None
+
+    # --------------------------------------------------------
+    # UPLOAD RETRY
+    # --------------------------------------------------------
 
     for attempt in range(
         1,
@@ -1155,15 +959,11 @@ def upload_to_youtube(
 
         try:
 
-            print("\n" + "-" * 60)
-
+            print()
             print(
-                f"📤 VIDEO UPLOAD"
-                f" — Attempt {attempt}/"
-                f"{UPLOAD_RETRIES}"
+                f"📤 Attempt "
+                f"{attempt}/{UPLOAD_RETRIES}"
             )
-
-            print("-" * 60)
 
             video_id = upload_video_file(
 
@@ -1175,78 +975,73 @@ def upload_to_youtube(
 
                 description=description,
 
-                tags=clean_tags
+                tags=tags
+            )
+
+            print(
+                "✅ Video uploaded."
             )
 
             break
 
-        except HttpError as e:
+        except HttpError as error:
 
+            print()
             print(
-                "\n❌ YouTube API upload error:"
+                "❌ YouTube API error:"
             )
 
             print(
-                f"{e}"
+                error
             )
 
-            if attempt < UPLOAD_RETRIES:
-
-                print(
-                    f"\n🔄 Retrying in "
-                    f"{RETRY_DELAY_SECONDS} seconds..."
-                )
-
-                time.sleep(
-                    RETRY_DELAY_SECONDS
-                )
-
-            else:
+            if attempt == UPLOAD_RETRIES:
 
                 raise
 
-        except Exception as e:
+        except Exception as error:
 
+            print()
             print(
-                "\n❌ Video upload failed:"
+                "❌ Upload error:"
             )
 
             print(
-                f"{e}"
+                error
             )
 
-            if attempt < UPLOAD_RETRIES:
-
-                print(
-                    f"\n🔄 Retrying in "
-                    f"{RETRY_DELAY_SECONDS} seconds..."
-                )
-
-                time.sleep(
-                    RETRY_DELAY_SECONDS
-                )
-
-            else:
+            if attempt == UPLOAD_RETRIES:
 
                 raise
 
-    # ========================================================
-    # VERIFY VIDEO ID
-    # ========================================================
+        if attempt < UPLOAD_RETRIES:
+
+            print(
+                f"🔄 Waiting "
+                f"{RETRY_DELAY_SECONDS}s..."
+            )
+
+            time.sleep(
+                RETRY_DELAY_SECONDS
+            )
+
+    # --------------------------------------------------------
+    # RESULT
+    # --------------------------------------------------------
 
     if not video_id:
 
         raise RuntimeError(
-            "YouTube upload failed: "
-            "No video ID returned."
+            "YouTube upload failed."
         )
 
-    # ========================================================
-    # SUCCESS
-    # ========================================================
+    video_url = (
+        f"https://www.youtube.com/watch?v={video_id}"
+    )
 
-    print("\n" + "=" * 70)
-    print("🎉 VIDEO UPLOAD SUCCESSFUL")
+    print()
+    print("=" * 70)
+    print("🎉 YOUTUBE UPLOAD SUCCESS")
     print("=" * 70)
 
     print(
@@ -1255,122 +1050,38 @@ def upload_to_youtube(
     )
 
     print(
-        f"🔗 https://www.youtube.com/watch?v={video_id}"
+        f"🔗 {video_url}"
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # THUMBNAIL
-    # ========================================================
+    # --------------------------------------------------------
 
     if thumbnail_path:
 
-        print(
-            "\n🖼️ Uploading custom thumbnail..."
+        upload_thumbnail(
+
+            youtube=youtube,
+
+            video_id=video_id,
+
+            thumbnail_path=thumbnail_path
         )
-
-        thumbnail_success = (
-            upload_thumbnail(
-                youtube=youtube,
-                video_id=video_id,
-                thumbnail_path=thumbnail_path
-            )
-        )
-
-        if thumbnail_success:
-
-            print(
-                "✅ Thumbnail successfully attached "
-                "to video."
-            )
-
-        else:
-
-            print(
-                "⚠️ Video uploaded but thumbnail "
-                "could not be attached."
-            )
-
-    else:
-
-        print(
-            "\n⚠️ No thumbnail path supplied."
-        )
-
-    print("\n" + "=" * 70)
 
     return video_id
 
 
 # ============================================================
-# OPTIONAL SHORTS HELPER
+# SHORTS UPLOAD HELPER
 # ============================================================
 
 def upload_short_to_youtube(
     video_path,
     title,
-    description,
-    tags,
+    description="",
+    tags=None,
     thumbnail_path=None
 ):
-    """
-    Dedicated helper for YouTube Shorts.
-
-    The actual Shorts classification is primarily
-    determined by the video's vertical format and
-    Shorts-compatible metadata.
-
-    Automatically ensures #Shorts is present
-    in the title.
-    """
-
-    title = clean_title(
-        title
-    )
-
-    # --------------------------------------------------------
-    # Add #Shorts
-    # --------------------------------------------------------
-
-    if "#shorts" not in title.lower():
-
-        # Make room for #Shorts
-        suffix = " #Shorts"
-
-        max_base_length = (
-            MAX_TITLE_LENGTH
-            - len(suffix)
-        )
-
-        title = (
-            title[
-                :max_base_length
-            ].rstrip()
-            + suffix
-        )
-
-    # --------------------------------------------------------
-    # Add Shorts hashtag to description
-    # --------------------------------------------------------
-
-    description = clean_description(
-        description
-    )
-
-    if "#shorts" not in description.lower():
-
-        if description:
-
-            description += (
-                "\n\n#Shorts"
-            )
-
-        else:
-
-            description = "#Shorts"
-
-    # --------------------------------------------------------
-    # Upload
-    # --------------------------------------------------------
 
     return upload_to_youtube(
 
@@ -1387,16 +1098,43 @@ def upload_short_to_youtube(
 
 
 # ============================================================
-# TEST
+# SIMPLE BACKWARD-COMPATIBLE FUNCTION
+# ============================================================
+
+def upload_video(
+    video_path,
+    title,
+    description="",
+    tags=None,
+    thumbnail_path=None
+):
+
+    return upload_short_to_youtube(
+
+        video_path=video_path,
+
+        title=title,
+
+        description=description,
+
+        tags=tags,
+
+        thumbnail_path=thumbnail_path
+    )
+
+
+# ============================================================
+# LOCAL TEST
 # ============================================================
 
 if __name__ == "__main__":
 
+    print()
     print(
-        "📺 YouTube uploader module loaded."
+        "📺 Hinglish Shayari YouTube uploader"
     )
 
     print(
-        "This file is normally called "
-        "from main.py."
+        "Use upload_short_to_youtube() "
+        "from your main pipeline."
     )
