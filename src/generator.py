@@ -157,7 +157,7 @@ def generate_lesson_content(lesson_title):
 
         Return only valid JSON.
         """
-        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+           response = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
         json_string = response.text.strip().replace("```json", "").replace("```", "")
         content = json.loads(json_string)
         print("✅ Lesson content generated successfully.")
