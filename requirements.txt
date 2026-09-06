@@ -13,8 +13,9 @@ requests
 
 # For image processing (e.g., slides, thumbnails)
 Pillow==9.5.0
+numpy
 
-# ✅ For MP3 to WAV conversion
+# For MP3 to WAV conversion
 pydub
 
 edge-tts
