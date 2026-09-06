@@ -1,37 +1,62 @@
+# ============================================================
 # FILE: src/generator.py
-# Hindi Motivation + Quotes Video Generator
-# Compatible with GitHub Actions, per-slide audio sync,
-# long-form videos, YouTube Shorts, thumbnails and background music.
+# ============================================================
+#
+# HINDI MOTIVATION YOUTUBE AUTOMATION
+#
+# Features:
+#   ✅ Gemini content generation
+#   ✅ Hindi motivational curriculum
+#   ✅ Natural Hindi Neural Voice
+#   ✅ Edge TTS
+#   ✅ Hindi / Devanagari font detection
+#   ✅ Voice timing / VTT timing
+#   ✅ Animated kinetic typography
+#   ✅ Speech-synced text highlighting
+#   ✅ Word/chunk based text animation
+#   ✅ Long-form videos
+#   ✅ YouTube Shorts
+#   ✅ Pexels background visuals
+#   ✅ Cinematic dark background
+#   ✅ Background music
+#   ✅ Professional thumbnails
+#   ✅ GitHub Actions compatible
+#
+# ============================================================
+
+
+# ============================================================
+# IMPORTS
+# ============================================================
 
 import os
 import json
 import time
 import random
 import re
+import subprocess
+import shutil
+from pathlib import Path
+from io import BytesIO
+
 import requests
 
-from io import BytesIO
-from pathlib import Path
-
 from google import genai
-from gtts import gTTS
-from gtts.tts import gTTSError
 
 from moviepy.editor import (
     AudioFileClip,
-    ImageClip,
     CompositeAudioClip,
     concatenate_videoclips,
-    vfx
+    concatenate_audioclips,
+    VideoClip,
+    vfx,
 )
-
-from moviepy.config import change_settings
 
 from PIL import (
     Image,
     ImageDraw,
     ImageFont,
-    ImageFilter
+    ImageFilter,
 )
 
 from pydub import AudioSegment
@@ -43,44 +68,173 @@ from pydub import AudioSegment
 
 ASSETS_PATH = Path("assets")
 
-FONT_FILE = ASSETS_PATH / "fonts/arial.ttf"
+MUSIC_PATH = (
+    ASSETS_PATH /
+    "music" /
+    "bg_music.mp3"
+)
 
-BACKGROUND_MUSIC_PATH = ASSETS_PATH / "music/bg_music.mp3"
-
-FALLBACK_THUMBNAIL_FONT = ImageFont.load_default()
-
-# Channel / creator name
 YOUR_NAME = "Aksh Dev"
 
-# Main niche
 CHANNEL_NICHE = "Hindi Motivation"
 
-# TTS language
-TTS_LANGUAGE = "hi"
+# ------------------------------------------------------------
+# Gemini
+# ------------------------------------------------------------
 
-# Gemini model
 GEMINI_MODEL = "gemini-3.6-flash"
 
-# Number of slides
-LONG_FORM_SLIDES_MIN = 7
-LONG_FORM_SLIDES_MAX = 9
+# ------------------------------------------------------------
+# Edge TTS
+# ------------------------------------------------------------
 
-# TTS retry configuration
-TTS_MAX_ATTEMPTS = 5
-TTS_BACKOFF_SECONDS = 5
-TTS_MIN_GAP_SECONDS = 2
+TTS_LANGUAGE = "hi"
 
-_last_tts_request = 0.0
+# Natural Indian Hindi male voice
+TTS_VOICE = "hi-IN-MadhurNeural"
+
+# Female alternative:
+# hi-IN-SwaraNeural
+
+TTS_RETRIES = 5
+TTS_BACKOFF = 5
+
+# ------------------------------------------------------------
+# Video
+# ------------------------------------------------------------
+
+LONG_WIDTH = 1920
+LONG_HEIGHT = 1080
+
+SHORT_WIDTH = 1080
+SHORT_HEIGHT = 1920
+
+FPS = 24
+
+# ------------------------------------------------------------
+# Text animation
+# ------------------------------------------------------------
+
+WORDS_PER_HIGHLIGHT = 3
+
+TEXT_ANIMATION_IN = 0.22
+
+# ------------------------------------------------------------
+# Audio
+# ------------------------------------------------------------
+
+BACKGROUND_MUSIC_VOLUME = 0.065
+
+# ------------------------------------------------------------
+# SEO
+# ------------------------------------------------------------
+
+MAX_TAGS = 25
 
 
 # ============================================================
-# IMAGEMAGICK - GITHUB ACTIONS
+# FONT DETECTION
 # ============================================================
 
-if os.name == "posix":
-    change_settings({
-        "IMAGEMAGICK_BINARY": "/usr/bin/convert"
-    })
+def find_hindi_font():
+    """
+    Find a proper Hindi / Devanagari font.
+
+    Priority:
+        1. Project font
+        2. Noto Sans Devanagari
+        3. System Noto
+        4. DejaVu
+        5. Arial fallback
+    """
+
+    candidates = [
+
+        # Project fonts
+        ASSETS_PATH /
+        "fonts" /
+        "NotoSansDevanagari-Regular.ttf",
+
+        ASSETS_PATH /
+        "fonts" /
+        "NotoSansDevanagari-Medium.ttf",
+
+        ASSETS_PATH /
+        "fonts" /
+        "NotoSansDevanagari-Bold.ttf",
+
+        # Ubuntu / GitHub Actions
+        Path(
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSansDevanagari-Regular.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansDevanagari-Regular.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSansDevanagari-Medium.ttf"
+        ),
+
+        # DejaVu fallback
+        Path(
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans.ttf"
+        ),
+
+        # Existing project fallback
+        ASSETS_PATH /
+        "fonts" /
+        "arial.ttf",
+    ]
+
+    for font_path in candidates:
+
+        if font_path.exists():
+
+            print(
+                f"🔤 Hindi font selected: "
+                f"{font_path}"
+            )
+
+            return font_path
+
+    print(
+        "⚠️ No Hindi font found. "
+        "Using PIL default font."
+    )
+
+    return None
+
+
+FONT_FILE = find_hindi_font()
+
+
+# ============================================================
+# FONT LOADER
+# ============================================================
+
+def get_font(size, bold=False):
+
+    if FONT_FILE:
+
+        try:
+
+            return ImageFont.truetype(
+                str(FONT_FILE),
+                size
+            )
+
+        except Exception as e:
+
+            print(
+                f"⚠️ Font loading error: {e}"
+            )
+
+    return ImageFont.load_default()
 
 
 # ============================================================
@@ -88,16 +242,20 @@ if os.name == "posix":
 # ============================================================
 
 def get_gemini_client():
-    """Creates and returns Gemini client."""
 
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv(
+        "GOOGLE_API_KEY"
+    )
 
     if not api_key:
-        raise RuntimeError(
-            "GOOGLE_API_KEY environment variable is missing."
+
+        raise EnvironmentError(
+            "GOOGLE_API_KEY is missing."
         )
 
-    return genai.Client(api_key=api_key)
+    return genai.Client(
+        api_key=api_key
+    )
 
 
 # ============================================================
@@ -105,1063 +263,943 @@ def get_gemini_client():
 # ============================================================
 
 def clean_json_response(text):
-    """Cleans Gemini response and extracts JSON safely."""
 
     if not text:
-        raise ValueError("Gemini returned an empty response.")
 
-    text = text.strip()
+        raise ValueError(
+            "Gemini returned empty response."
+        )
 
-    # Remove markdown code fences
-    text = text.replace("```json", "")
-    text = text.replace("```JSON", "")
-    text = text.replace("```", "")
+    text = str(text).strip()
 
-    text = text.strip()
+    # Remove markdown fences
+    text = re.sub(
+        r"^```json\s*",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
 
-    # Try direct JSON first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    text = re.sub(
+        r"^```\s*",
+        "",
+        text
+    )
 
-    # Try extracting JSON object
+    text = re.sub(
+        r"\s*```$",
+        "",
+        text
+    )
+
+    # Find JSON object
     start = text.find("{")
     end = text.rfind("}")
 
-    if start != -1 and end != -1 and end > start:
-        extracted = text[start:end + 1]
+    if start >= 0 and end >= 0:
 
-        try:
-            return json.loads(extracted)
-        except json.JSONDecodeError:
-            pass
+        text = text[
+            start:end + 1
+        ]
 
-    raise ValueError(
-        "Gemini response was not valid JSON."
-    )
+    return json.loads(text)
 
 
 # ============================================================
 # PEXELS IMAGE SEARCH
 # ============================================================
 
-def get_pexels_image(query, video_type):
-    """
-    Searches Pexels for a motivational image.
-    """
+def get_pexels_image(
+    query,
+    video_type="long"
+):
 
-    pexels_api_key = os.getenv("PEXELS_API_KEY")
+    api_key = os.getenv(
+        "PEXELS_API_KEY"
+    )
 
-    if not pexels_api_key:
+    if not api_key:
+
         print(
-            "⚠️ PEXELS_API_KEY not found. "
-            "Using fallback background."
+            "⚠️ PEXELS_API_KEY missing."
         )
+
         return None
 
-    if video_type == "long":
-        orientation = "landscape"
-    else:
+    if video_type == "short":
+
         orientation = "portrait"
 
-    # Motivation-focused search
-    motivation_words = [
+    else:
+
+        orientation = "landscape"
+
+    motivation_keywords = [
+
         "motivation",
+
         "success",
+
         "discipline",
+
+        "focus",
+
+        "confidence",
+
         "determination",
+
+        "achievement",
+
+        "journey",
+
+        "dream",
+
         "hard work",
-        "sunrise",
-        "mountain",
-        "lonely person",
-        "success journey"
+
+        "courage",
+
     ]
 
-    clean_query = str(query).strip()
-
-    # Pick one additional visual keyword
-    extra = random.choice(motivation_words)
+    keyword = random.choice(
+        motivation_keywords
+    )
 
     search_query = (
-        f"{clean_query} {extra} cinematic"
+        f"{query} {keyword}"
     )
+
+    url = (
+        "https://api.pexels.com/v1/search"
+    )
+
+    headers = {
+        "Authorization": api_key
+    }
+
+    params = {
+
+        "query": search_query,
+
+        "orientation": orientation,
+
+        "per_page": 15,
+    }
 
     try:
 
-        headers = {
-            "Authorization": pexels_api_key
-        }
-
-        params = {
-            "query": search_query,
-            "per_page": 1,
-            "orientation": orientation
-        }
-
         response = requests.get(
-            "https://api.pexels.com/v1/search",
+            url,
             headers=headers,
             params=params,
-            timeout=15
+            timeout=30
         )
 
         response.raise_for_status()
 
         data = response.json()
 
-        photos = data.get("photos", [])
+        photos = data.get(
+            "photos",
+            []
+        )
 
         if not photos:
+
             print(
-                f"⚠️ No Pexels image found for: {search_query}"
+                "⚠️ No Pexels image found."
             )
+
             return None
 
+        photo = random.choice(
+            photos
+        )
+
+        src = photo.get(
+            "src",
+            {}
+        )
+
         image_url = (
-            photos[0]["src"].get("large2x")
-            or photos[0]["src"].get("large")
-            or photos[0]["src"].get("original")
+            src.get("large2x")
+            or src.get("large")
+            or src.get("original")
         )
 
         if not image_url:
+
             return None
 
         image_response = requests.get(
             image_url,
-            timeout=15
+            timeout=30
         )
 
         image_response.raise_for_status()
 
         return Image.open(
-            BytesIO(image_response.content)
-        ).convert("RGBA")
-
-    except requests.exceptions.RequestException as e:
-
-        print(
-            f"❌ Network error fetching Pexels image: {e}"
-        )
+            BytesIO(
+                image_response.content
+            )
+        ).convert("RGB")
 
     except Exception as e:
 
         print(
-            f"❌ Error fetching Pexels image: {e}"
+            f"⚠️ Pexels error: {e}"
         )
 
-    return None
+        return None
 
 
 # ============================================================
-# TTS THROTTLE
+# FALLBACK BACKGROUND
 # ============================================================
 
-def _throttle_tts():
+def create_fallback_background(
+    width,
+    height
+):
 
-    global _last_tts_request
-
-    elapsed = (
-        time.monotonic()
-        - _last_tts_request
+    image = Image.new(
+        "RGB",
+        (width, height),
+        (10, 10, 16)
     )
 
-    if elapsed < TTS_MIN_GAP_SECONDS:
+    draw = ImageDraw.Draw(
+        image
+    )
 
-        time.sleep(
-            TTS_MIN_GAP_SECONDS - elapsed
+    # Subtle gradient
+    for y in range(height):
+
+        ratio = (
+            y /
+            max(
+                1,
+                height - 1
+            )
         )
 
-    _last_tts_request = time.monotonic()
+        value = int(
+            10 +
+            ratio * 22
+        )
+
+        draw.line(
+            (
+                0,
+                y,
+                width,
+                y
+            ),
+            fill=(
+                value,
+                value,
+                min(
+                    45,
+                    value + 12
+                )
+            )
+        )
+
+    return image
 
 
 # ============================================================
-# TEXT TO SPEECH
+# PREPARE BACKGROUND
 # ============================================================
 
-def text_to_speech(text, output_path):
-    """
-    Converts Hindi text into Hindi speech.
-    """
+def prepare_background(
+    video_type,
+    visual_query
+):
 
-    print("🎤 Generating Hindi voice-over...")
+    if video_type == "short":
 
-    output_path = Path(output_path)
+        width = SHORT_WIDTH
+        height = SHORT_HEIGHT
 
-    temp_mp3_path = (
-        output_path.parent
-        / f"{output_path.stem}_temp.mp3"
+    else:
+
+        width = LONG_WIDTH
+        height = LONG_HEIGHT
+
+    image = get_pexels_image(
+        visual_query or "motivation",
+        video_type
     )
 
-    wav_path = output_path.with_suffix(".wav")
+    if image is None:
 
-    for attempt in range(
-        1,
-        TTS_MAX_ATTEMPTS + 1
-    ):
-
-        try:
-
-            _throttle_tts()
-
-            tts = gTTS(
-                text=text,
-                lang=TTS_LANGUAGE,
-                slow=False
+        image = (
+            create_fallback_background(
+                width,
+                height
             )
+        )
 
-            tts.save(
-                str(temp_mp3_path)
-            )
+    # --------------------------------------------------------
+    # Cover crop
+    # --------------------------------------------------------
 
-            if (
-                not temp_mp3_path.exists()
-                or temp_mp3_path.stat().st_size < 1024
-            ):
-
-                raise gTTSError(
-                    "gTTS produced an empty audio file."
-                )
-
-            audio = AudioSegment.from_mp3(
-                str(temp_mp3_path)
-            )
-
-            audio.export(
-                str(wav_path),
-                format="wav",
-                codec="pcm_s16le"
-            )
-
-            if temp_mp3_path.exists():
-                temp_mp3_path.unlink()
-
-            print(
-                "✅ Hindi voice generated successfully."
-            )
-
-            return wav_path
-
-        except Exception as e:
-
-            if temp_mp3_path.exists():
-                temp_mp3_path.unlink()
-
-            if attempt == TTS_MAX_ATTEMPTS:
-
-                print(
-                    "❌ Hindi TTS failed after "
-                    f"{TTS_MAX_ATTEMPTS} attempts: {e}"
-                )
-
-                raise
-
-            delay = (
-                TTS_BACKOFF_SECONDS
-                * (2 ** (attempt - 1))
-                + random.uniform(0, 2)
-            )
-
-            print(
-                f"⚠️ TTS attempt "
-                f"{attempt}/{TTS_MAX_ATTEMPTS} failed."
-            )
-
-            print(
-                f"   Retrying in {delay:.1f} seconds..."
-            )
-
-            time.sleep(delay)
-
-
-# ============================================================
-# MOTIVATION CURRICULUM
-# ============================================================
-
-def generate_curriculum(previous_titles=None):
-    """
-    Generates a series plan for Hindi motivational videos.
-    """
-
-    print(
-        "🤖 Generating Hindi motivation content plan..."
+    source_ratio = (
+        image.width /
+        image.height
     )
+
+    target_ratio = (
+        width /
+        height
+    )
+
+    if source_ratio > target_ratio:
+
+        new_height = height
+
+        new_width = int(
+            height *
+            source_ratio
+        )
+
+    else:
+
+        new_width = width
+
+        new_height = int(
+            width /
+            source_ratio
+        )
+
+    image = image.resize(
+        (
+            new_width,
+            new_height
+        ),
+        Image.Resampling.LANCZOS
+    )
+
+    left = (
+        new_width -
+        width
+    ) // 2
+
+    top = (
+        new_height -
+        height
+    ) // 2
+
+    image = image.crop(
+        (
+            left,
+            top,
+            left + width,
+            top + height
+        )
+    )
+
+    # --------------------------------------------------------
+    # Cinematic blur
+    # --------------------------------------------------------
+
+    image = image.filter(
+        ImageFilter.GaussianBlur(
+            radius=1.4
+        )
+    )
+
+    # --------------------------------------------------------
+    # Dark cinematic overlay
+    # --------------------------------------------------------
+
+    overlay = Image.new(
+        "RGBA",
+        (
+            width,
+            height
+        ),
+        (
+            0,
+            0,
+            0,
+            125
+        )
+    )
+
+    image = Image.alpha_composite(
+        image.convert("RGBA"),
+        overlay
+    )
+
+    return image.convert(
+        "RGB"
+    )
+
+
+# ============================================================
+# CURRICULUM GENERATION
+# ============================================================
+
+def generate_curriculum(
+    previous_titles=None
+):
 
     client = get_gemini_client()
 
-    history = ""
+    previous_titles = (
+        previous_titles or []
+    )
 
-    if previous_titles:
-
-        formatted = "\n".join(
-            [
-                f"{i + 1}. {title}"
-                for i, title in enumerate(
-                    previous_titles
-                )
-            ]
-        )
-
-        history = f"""
-Previously generated videos:
-
-{formatted}
-
-IMPORTANT:
-Do not repeat these topics, titles,
-quotes or concepts.
-
-Create fresh topics that feel different.
-"""
+    previous_text = "\n".join(
+        previous_titles[:100]
+    )
 
     prompt = f"""
-You are an expert Hindi motivational YouTube
-content strategist.
+You are a professional Hindi motivational
+YouTube content strategist.
 
-Create a YouTube content series for:
+Create exactly 20 fresh Hindi Motivation
+video topics.
 
-CHANNEL NICHE:
-Hindi Motivation
-
-LANGUAGE:
-Natural Hindi
-
-AUDIENCE:
-Indian viewers interested in motivation,
-discipline, success, confidence,
-self improvement and life lessons.
-
-{history}
-
-The videos must NOT be about:
-- programming
-- AI tutorials
-- software development
-- technology education
-- coding
-
-The niche is ONLY Hindi motivation.
-
-Generate 20 fresh video ideas.
+Audience:
+Indian Hindi-speaking audience.
 
 Topics can include:
 
-- मेहनत
-- सफलता
-- अनुशासन
-- आत्मविश्वास
-- समय
-- लक्ष्य
-- असफलता
-- हार के बाद वापसी
-- जिंदगी
-- अकेलेपन से ताकत
-- सपने
-- संघर्ष
+- self confidence
+- discipline
 - consistency
-- self respect
-- positive thinking
+- failure
+- success
+- hard work
 - focus
+- mindset
+- courage
+- time management
+- habits
+- self improvement
+- overcoming fear
+- persistence
+- goals
 - patience
-- career motivation
-- student motivation
-- morning motivation
-- रात में सोचने वालों के लिए motivation
+- mental strength
+- positive thinking
 
-Titles should be emotionally powerful,
-natural Hindi and clickable.
+Avoid:
 
-Avoid fake claims.
+- AI
+- Artificial Intelligence
+- programming
+- coding
+- software
+- developer
+- agents
+- technology tutorials
+- computer tutorials
 
-Do not copy famous quotes word-for-word.
+Do not repeat these previous titles:
 
-Every title should feel like a real
-Hindi motivational YouTube video.
+{previous_text}
 
-Return ONLY valid JSON.
+Titles should be emotionally interesting
+and suitable for YouTube.
 
-Required structure:
+Return ONLY valid JSON:
 
 {{
   "lessons": [
     {{
-      "chapter": 1,
-      "part": 1,
-      "title": "Hindi title",
-      "status": "pending",
-      "youtube_id": null
+      "title": "...",
+      "chapter": "1",
+      "part": "1",
+      "status": "pending"
     }}
   ]
 }}
-
-Exactly 20 lesson objects.
 """
 
-    try:
-
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-
-        curriculum = clean_json_response(
-            response.text
-        )
-
-        print(
-            "✅ Hindi motivation curriculum generated."
-        )
-
-        return curriculum
-
-    except Exception as e:
-
-        print(
-            "❌ Failed to generate curriculum:"
-            f" {e}"
-        )
-
-        raise
-
-
-# ============================================================
-# LESSON CONTENT
-# ============================================================
-
-def generate_lesson_content(lesson_title):
-    """
-    Generates Hindi motivational video content,
-    Shorts content, SEO metadata and thumbnail text.
-    """
-
-    print(
-        f"🤖 Generating Hindi motivation video:"
-        f" '{lesson_title}'..."
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt
     )
+
+    return clean_json_response(
+        response.text
+    )
+
+
+# ============================================================
+# LESSON CONTENT GENERATION
+# ============================================================
+
+def generate_lesson_content(
+    lesson_title
+):
 
     client = get_gemini_client()
 
     prompt = f"""
-You are a professional Hindi motivational
-YouTube scriptwriter and SEO strategist.
+You are an expert Hindi motivational
+YouTube scriptwriter.
 
-VIDEO TOPIC:
-{lesson_title}
+Create a powerful motivational video about:
 
-CHANNEL NICHE:
-Hindi Motivation
+"{lesson_title}"
 
-LANGUAGE:
-Hindi
+The audience is Indian Hindi-speaking viewers.
 
-TARGET AUDIENCE:
-Indian viewers.
+The script must sound like a REAL HUMAN
+motivational speaker.
 
-IMPORTANT:
+STYLE:
 
-This is NOT an AI, programming or developer channel.
+- emotional
+- natural spoken Hindi
+- powerful
+- conversational
+- simple Hindi
+- relatable
+- practical
+- inspiring
+- no robotic AI language
 
 Do NOT use:
+
+- programming
 - AI
-- Artificial Intelligence
-- Developer
-- Programming
-- Coding
-- Agents
-- Software
-- Technology
+- artificial intelligence
+- developer terminology
+- technical language
+- generic filler
 
-unless the topic genuinely requires it.
+==================================================
+LONG VIDEO
+==================================================
 
-The video should feel emotional,
-human, cinematic and motivational.
+Create 7-9 sections.
 
-Do NOT copy famous copyrighted quotes.
+Each section:
 
-Create original motivational lines.
+title:
+A short powerful Hindi title.
 
-The first slide must have a VERY STRONG HOOK.
+content:
+45-80 words of natural spoken Hindi.
 
-The viewer should immediately feel:
-"ये वीडियो मुझे पूरा देखना चाहिए।"
+visual_query:
+An English Pexels search query.
 
---------------------------------------------------
-LONG FORM VIDEO
---------------------------------------------------
+The content must flow naturally from
+one section to the next.
 
-Create 7 to 9 slides.
-
-Each slide needs:
-
-"title"
-"content"
-"visual_query"
-
-CONTENT RULES:
-
-- Natural Hindi
-- Easy to understand
-- Short sentences
-- Emotional storytelling
-- No unnecessary English
-- No robotic wording
-- No repetitive points
-- Strong progression
-- Final slide should give a memorable takeaway
-
---------------------------------------------------
+==================================================
 SHORT
---------------------------------------------------
+==================================================
 
-Create a short motivational script.
+Create:
 
-It should be approximately
-20 to 45 seconds when spoken.
+short_form_highlight:
+35-60 powerful Hindi words.
 
-Include:
+short_title:
+Clickable Hindi title.
 
-"hook"
-"script"
-"ending"
+short_tags:
+Relevant YouTube search-intent tags.
 
-The hook must be powerful.
-
-Example style:
-
-"अगर आज तुम्हें लग रहा है कि तुम हार गए हो,
-तो ये बात याद रखना..."
-
-Do NOT copy this exact example.
-
---------------------------------------------------
+==================================================
 YOUTUBE SEO
---------------------------------------------------
+==================================================
 
 Generate:
 
-"title"
+title:
+Clickable Hindi YouTube title.
 
-"description"
+description:
+Natural Hindi YouTube description.
 
-"tags"
+tags:
+Relevant search-intent tags only.
 
-"keywords"
+hashtags:
+5-8 relevant hashtags.
 
-"hashtags"
+thumbnail_text:
+2-6 powerful words.
 
-SEO MUST be based on actual search intent
-for Hindi motivation viewers.
-
-Think deeply about what Indian users might
-actually search on YouTube.
-
-Good examples of keyword intent:
-
-hindi motivation
-motivational quotes in hindi
-life motivation hindi
-success motivation hindi
-motivational speech hindi
-self improvement hindi
-student motivation hindi
-morning motivation hindi
-discipline motivation hindi
-hard work motivation hindi
-
-But choose tags that are actually relevant
-to THIS VIDEO.
-
-Do NOT simply take random words from the title.
-
-Do NOT generate generic irrelevant tags such as:
+DO NOT generate irrelevant tags like:
 
 AI
+AI:
 Agents
+Artificial Intelligence
+Autonomous
 Developer
 Future
+Intelligent
+Next
 Programming
 Systems
+The
 Tutorial
-Artificial Intelligence
-
-unless genuinely relevant.
-
-Use a mixture of:
-
-1. Main keyword
-2. Related search keyword
-3. Long-tail keyword
-4. Hindi search phrase
-5. Audience intent
-6. Topic-specific keyword
-
-Keep tags natural.
-
-Generate approximately 10-18 useful tags.
-
---------------------------------------------------
-THUMBNAIL
---------------------------------------------------
-
-Generate:
-
-"thumbnail_text"
-
-Thumbnail text must be:
-
-- 2 to 6 words
-- Hindi
-- emotionally strong
-- readable
-- curiosity driven
-- NOT the full video title
-
-Examples of style:
-
-"हार मत मानना"
-
-"बस एक बार और"
-
-"तुम कर सकते हो"
-
-"वक्त बदल जाएगा"
-
-Do not copy these exact examples.
-
---------------------------------------------------
-DESCRIPTION
---------------------------------------------------
-
-Description should:
-
-- Start with a strong hook
-- Explain the video's value
-- Naturally include relevant keywords
-- Encourage viewers to watch till the end
-- Avoid keyword stuffing
-- Include relevant hashtags at the end
-
---------------------------------------------------
+What's
+and
+for
+of
 
 Return ONLY valid JSON.
 
-Required JSON structure:
+Format:
 
 {{
   "long_form_slides": [
     {{
-      "title": "Hindi slide title",
-      "content": "Hindi spoken content",
-      "visual_query": "cinematic motivational visual"
+      "title": "...",
+      "content": "...",
+      "visual_query": "..."
     }}
   ],
 
-  "short_form_highlight": {{
-    "hook": "Hindi hook",
-    "script": "Hindi short script",
-    "ending": "Hindi ending"
-  }},
+  "short_form_highlight": "...",
+
+  "short_title": "...",
+
+  "short_tags": [],
 
   "youtube": {{
-    "title": "SEO optimized Hindi YouTube title",
-    "description": "SEO optimized Hindi description",
-    "tags": [
-      "relevant tag 1",
-      "relevant tag 2"
-    ],
-    "keywords": [
-      "keyword 1",
-      "keyword 2"
-    ],
-    "hashtags": [
-      "#HindiMotivation",
-      "#Motivation"
-    ]
-  }},
-
-  "thumbnail_text": "2 to 6 word Hindi thumbnail text"
+    "title": "...",
+    "description": "...",
+    "tags": [],
+    "hashtags": [],
+    "thumbnail_text": "..."
+  }}
 }}
 """
 
-    try:
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt
+    )
 
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
+    return clean_json_response(
+        response.text
+    )
+
+
+# ============================================================
+# EDGE TTS
+# ============================================================
+
+def text_to_speech(
+    text,
+    output_path
+):
+    """
+    Generate natural Hindi neural speech.
+
+    Uses Edge TTS.
+
+    Creates:
+
+        .mp3
+        .wav
+        .timing.vtt
+    """
+
+    text = str(
+        text or ""
+    ).strip()
+
+    if not text:
+
+        raise ValueError(
+            "TTS text is empty."
         )
 
-        content = clean_json_response(
-            response.text
-        )
+    output_path = Path(
+        output_path
+    )
 
-        print(
-            "✅ Hindi motivational content generated."
-        )
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-        return content
+    # Always use mp3 as Edge output
+    mp3_path = output_path.with_suffix(
+        ".mp3"
+    )
 
-    except Exception as e:
+    vtt_path = output_path.with_suffix(
+        ".vtt"
+    )
 
-        print(
-            "❌ Failed to generate lesson content:"
-            f" {e}"
-        )
+    timing_path = output_path.with_suffix(
+        ".timing.vtt"
+    )
 
-        raise
+    print(
+        f"🎙️ Voice: {TTS_VOICE}"
+    )
+
+    for attempt in range(
+        1,
+        TTS_RETRIES + 1
+    ):
+
+        try:
+
+            if mp3_path.exists():
+
+                mp3_path.unlink()
+
+            if vtt_path.exists():
+
+                vtt_path.unlink()
+
+            command = [
+
+                "edge-tts",
+
+                "--voice",
+                TTS_VOICE,
+
+                "--text",
+                text,
+
+                "--write-media",
+                str(mp3_path),
+
+                "--write-subtitles",
+                str(vtt_path),
+            ]
+
+            print(
+                f"🎤 TTS attempt "
+                f"{attempt}/"
+                f"{TTS_RETRIES}"
+            )
+
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=180
+            )
+
+            if result.returncode != 0:
+
+                raise RuntimeError(
+                    result.stderr
+                    or
+                    "edge-tts command failed."
+                )
+
+            if not mp3_path.exists():
+
+                raise FileNotFoundError(
+                    "Edge TTS MP3 was not created."
+                )
+
+            # ------------------------------------------------
+            # Convert MP3 to WAV
+            # ------------------------------------------------
+
+            audio = AudioSegment.from_mp3(
+                mp3_path
+            )
+
+            audio.export(
+                output_path,
+                format="wav"
+            )
+
+            # ------------------------------------------------
+            # Preserve VTT timing
+            # ------------------------------------------------
+
+            if vtt_path.exists():
+
+                shutil.copy2(
+                    vtt_path,
+                    timing_path
+                )
+
+            print(
+                f"✅ Hindi neural voice created: "
+                f"{output_path}"
+            )
+
+            return output_path
+
+        except Exception as e:
+
+            print(
+                f"⚠️ TTS error: {e}"
+            )
+
+            if attempt < TTS_RETRIES:
+
+                wait_time = (
+                    TTS_BACKOFF *
+                    attempt
+                )
+
+                print(
+                    f"⏳ Retrying in "
+                    f"{wait_time} seconds..."
+                )
+
+                time.sleep(
+                    wait_time
+                )
+
+    raise RuntimeError(
+        "Hindi neural TTS failed after "
+        f"{TTS_RETRIES} attempts."
+    )
 
 
 # ============================================================
 # TEXT WRAPPING
 # ============================================================
 
-def wrap_text(draw, text, font, max_width):
+def wrap_text(
+    draw,
+    text,
+    font,
+    max_width
+):
 
-    words = str(text).split()
+    words = str(
+        text or ""
+    ).split()
 
     lines = []
 
-    current_line = ""
+    current = ""
 
     for word in words:
 
-        test_line = (
-            f"{current_line} {word}"
-        ).strip()
+        test = (
+            f"{current} {word}"
+            .strip()
+        )
 
         bbox = draw.textbbox(
             (0, 0),
-            test_line,
+            test,
             font=font
         )
 
-        text_width = (
-            bbox[2] - bbox[0]
+        width = (
+            bbox[2] -
+            bbox[0]
         )
 
-        if text_width <= max_width:
+        if width <= max_width:
 
-            current_line = test_line
+            current = test
 
         else:
 
-            if current_line:
+            if current:
+
                 lines.append(
-                    current_line
+                    current
                 )
 
-            current_line = word
+            current = word
 
-    if current_line:
+    if current:
+
         lines.append(
-            current_line
+            current
         )
 
     return lines
 
 
 # ============================================================
-# VISUAL GENERATOR
+# GENERATE VISUAL
 # ============================================================
 
 def generate_visuals(
     output_dir,
     video_type,
     slide_content=None,
-    thumbnail_title=None,
-    slide_number=0,
-    total_slides=0
+    slide_number=None,
+    total_slides=None,
+    thumbnail_title=None
 ):
-    """
-    Generates cinematic motivational slides
-    and high-contrast thumbnails.
-    """
+
+    output_dir = Path(
+        output_dir
+    )
 
     output_dir.mkdir(
-        exist_ok=True,
-        parents=True
+        parents=True,
+        exist_ok=True
     )
-
-    is_thumbnail = (
-        thumbnail_title is not None
-    )
-
-    # --------------------------------------------------------
-    # DIMENSIONS
-    # --------------------------------------------------------
-
-    if video_type == "long":
-
-        width = 1920
-        height = 1080
-
-    else:
-
-        width = 1080
-        height = 1920
-
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
-
-    if is_thumbnail:
-
-        title = str(
-            thumbnail_title or ""
-        )
-
-    else:
-
-        title = str(
-            slide_content.get(
-                "title",
-                ""
-            )
-        )
-
-    # --------------------------------------------------------
-    # BACKGROUND
-    # --------------------------------------------------------
-
-    bg_image = get_pexels_image(
-        title,
-        video_type
-    )
-
-    if not bg_image:
-
-        bg_image = Image.new(
-            "RGBA",
-            (width, height),
-            color=(12, 17, 29, 255)
-        )
-
-    # Resize
-    bg_image = bg_image.resize(
-        (width, height)
-    )
-
-    # Cinematic blur
-    bg_image = bg_image.filter(
-        ImageFilter.GaussianBlur(3)
-    )
-
-    # Dark overlay
-    darken_layer = Image.new(
-        "RGBA",
-        bg_image.size,
-        (0, 0, 0, 155)
-    )
-
-    final_bg = Image.alpha_composite(
-        bg_image,
-        darken_layer
-    ).convert("RGB")
-
-    # --------------------------------------------------------
-    # DRAW
-    # --------------------------------------------------------
-
-    draw = ImageDraw.Draw(
-        final_bg
-    )
-
-    # --------------------------------------------------------
-    # FONTS
-    # --------------------------------------------------------
-
-    try:
-
-        if is_thumbnail:
-
-            title_font = ImageFont.truetype(
-                str(FONT_FILE),
-                105
-            )
-
-        elif video_type == "long":
-
-            title_font = ImageFont.truetype(
-                str(FONT_FILE),
-                76
-            )
-
-        else:
-
-            title_font = ImageFont.truetype(
-                str(FONT_FILE),
-                78
-            )
-
-        content_font = ImageFont.truetype(
-            str(FONT_FILE),
-            48 if video_type == "long" else 58
-        )
-
-        footer_font = ImageFont.truetype(
-            str(FONT_FILE),
-            26
-        )
-
-    except IOError:
-
-        print(
-            "⚠️ Font not found. "
-            "Using default font."
-        )
-
-        title_font = (
-            FALLBACK_THUMBNAIL_FONT
-        )
-
-        content_font = (
-            FALLBACK_THUMBNAIL_FONT
-        )
-
-        footer_font = (
-            FALLBACK_THUMBNAIL_FONT
-        )
 
     # ========================================================
     # THUMBNAIL
     # ========================================================
 
-    if is_thumbnail:
+    if thumbnail_title is not None:
 
-        # Strong dark gradient-like overlays
-        overlay = Image.new(
-            "RGBA",
-            (width, height),
-            (0, 0, 0, 80)
+        width = 1280
+        height = 720
+
+        # Use random motivational background
+        image = prepare_background(
+            "long",
+            "motivational success person"
         )
-
-        final_bg = Image.alpha_composite(
-            final_bg.convert("RGBA"),
-            overlay
-        ).convert("RGB")
 
         draw = ImageDraw.Draw(
-            final_bg
+            image
         )
 
-        # Thumbnail text wrapping
+        title_font = get_font(
+            78
+        )
+
+        brand_font = get_font(
+            32
+        )
+
+        text = str(
+            thumbnail_title
+        ).strip()
+
+        # Limit thumbnail text
+        if len(text) > 80:
+
+            text = text[:77] + "..."
+
         lines = wrap_text(
             draw,
-            title,
+            text,
             title_font,
-            width * 0.82
+            1050
         )
 
-        line_height = 125
+        line_height = 95
 
         total_height = (
-            len(lines)
-            * line_height
+            len(lines) *
+            line_height
         )
 
-        start_y = (
-            height - total_height
-        ) / 2
+        y = (
+            height -
+            total_height
+        ) // 2 - 20
 
         for line in lines:
-
-            bbox = draw.textbbox(
-                (0, 0),
-                line,
-                font=title_font,
-                stroke_width=4
-            )
-
-            text_width = (
-                bbox[2] - bbox[0]
-            )
-
-            x = (
-                width - text_width
-            ) / 2
-
-            # Heavy black outline
-            draw.text(
-                (x, start_y),
-                line,
-                font=title_font,
-                fill=(255, 255, 255),
-                stroke_width=5,
-                stroke_fill=(0, 0, 0)
-            )
-
-            start_y += line_height
-
-        # Small channel branding
-        brand_text = (
-            f"{CHANNEL_NICHE} • {YOUR_NAME}"
-        )
-
-        brand_bbox = draw.textbbox(
-            (0, 0),
-            brand_text,
-            font=footer_font
-        )
-
-        brand_x = 35
-
-        brand_y = (
-            height
-            - (
-                brand_bbox[3]
-                - brand_bbox[1]
-            )
-            - 30
-        )
-
-        draw.text(
-            (brand_x, brand_y),
-            brand_text,
-            font=footer_font,
-            fill=(220, 220, 220)
-        )
-
-    # ========================================================
-    # NORMAL SLIDE
-    # ========================================================
-
-    else:
-
-        header_height = int(
-            height * 0.18
-        )
-
-        # Header background
-        draw.rectangle(
-            [
-                0,
-                0,
-                width,
-                header_height
-            ],
-            fill=(15, 25, 40)
-        )
-
-        # Title wrapping
-        title_lines = wrap_text(
-            draw,
-            title,
-            title_font,
-            width * 0.88
-        )
-
-        line_height = 85
-
-        total_title_height = (
-            len(title_lines)
-            * line_height
-        )
-
-        y_text = (
-            header_height
-            - total_title_height
-        ) / 2
-
-        for line in title_lines:
 
             bbox = draw.textbbox(
                 (0, 0),
@@ -1170,392 +1208,1347 @@ def generate_visuals(
             )
 
             text_width = (
-                bbox[2] - bbox[0]
+                bbox[2] -
+                bbox[0]
             )
 
             x = (
-                width - text_width
-            ) / 2
+                width -
+                text_width
+            ) // 2
 
+            # Black outline
             draw.text(
-                (x, y_text),
+                (
+                    x,
+                    y
+                ),
                 line,
                 font=title_font,
-                fill=(255, 255, 255)
+                fill="white",
+                stroke_width=9,
+                stroke_fill="black"
             )
 
-            y_text += line_height
+            y += line_height
 
         # ----------------------------------------------------
-        # CONTENT
+        # Branding
         # ----------------------------------------------------
 
-        content = str(
-            slide_content.get(
-                "content",
-                ""
-            )
+        brand = (
+            f"{YOUR_NAME} • "
+            f"{CHANNEL_NICHE}"
         )
 
-        content_lines = wrap_text(
-            draw,
-            content,
-            content_font,
+        bbox = draw.textbbox(
+            (0, 0),
+            brand,
+            font=brand_font
+        )
+
+        brand_width = (
+            bbox[2] -
+            bbox[0]
+        )
+
+        draw.text(
+            (
+                (width - brand_width) // 2,
+                650
+            ),
+            brand,
+            font=brand_font,
+            fill="white",
+            stroke_width=3,
+            stroke_fill="black"
+        )
+
+        # ----------------------------------------------------
+        # JPEG thumbnail
+        # ----------------------------------------------------
+
+        path = (
+            output_dir /
+            "thumbnail.jpg"
+        )
+
+        image.save(
+            path,
+            "JPEG",
+            quality=90,
+            optimize=True
+        )
+
+        print(
+            f"🖼️ Thumbnail created: "
+            f"{path}"
+        )
+
+        return path
+
+    # ========================================================
+    # NORMAL SLIDE
+    # ========================================================
+
+    slide_content = (
+        slide_content or {}
+    )
+
+    title = str(
+        slide_content.get(
+            "title",
+            ""
+        )
+    ).strip()
+
+    content = str(
+        slide_content.get(
+            "content",
+            ""
+        )).strip()
+
+    visual_query = str(
+        slide_content.get(
+            "visual_query",
+            "motivation"
+        )).strip()
+
+    if video_type == "short":
+
+        width = SHORT_WIDTH
+        height = SHORT_HEIGHT
+
+    else:
+
+        width = LONG_WIDTH
+        height = LONG_HEIGHT
+
+    image = prepare_background(
+        video_type,
+        visual_query
+    )
+
+    draw = ImageDraw.Draw(
+        image
+    )
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    if video_type == "short":
+
+        title_font = get_font(
+            58
+        )
+
+        title_y = 100
+
+    else:
+
+        title_font = get_font(
+            58
+        )
+
+        title_y = 55
+
+    title_lines = wrap_text(
+        draw,
+        title,
+        title_font,
+        int(
             width * 0.82
         )
+    )
 
-        line_height = 68
+    y = title_y
 
-        total_content_height = (
-            len(content_lines)
-            * line_height
+    for line in title_lines:
+
+        bbox = draw.textbbox(
+            (0, 0),
+            line,
+            font=title_font
         )
 
-        # Keep content centered
-        y_content = max(
-            header_height + 80,
+        text_width = (
+            bbox[2] -
+            bbox[0]
+        )
+
+        x = (
+            width -
+            text_width
+        ) // 2
+
+        draw.text(
             (
-                height
-                - total_content_height
-            ) / 2
+                x,
+                y
+            ),
+            line,
+            font=title_font,
+            fill="white",
+            stroke_width=4,
+            stroke_fill="black"
         )
 
-        for line in content_lines:
+        y += 72
 
-            bbox = draw.textbbox(
-                (0, 0),
-                line,
-                font=content_font
-            )
+    # --------------------------------------------------------
+    # FOOTER
+    # --------------------------------------------------------
 
-            text_width = (
-                bbox[2] - bbox[0]
-            )
+    footer_font = get_font(
+        26
+    )
 
-            x = (
-                width - text_width
-            ) / 2
+    footer = (
+        f"{YOUR_NAME} • "
+        f"{CHANNEL_NICHE}"
+    )
 
-            draw.text(
-                (x, y_content),
-                line,
-                font=content_font,
-                fill=(235, 235, 235)
-            )
+    bbox = draw.textbbox(
+        (0, 0),
+        footer,
+        font=footer_font
+    )
 
-            y_content += line_height
+    footer_width = (
+        bbox[2] -
+        bbox[0]
+    )
 
-        # ----------------------------------------------------
-        # FOOTER
-        # ----------------------------------------------------
+    draw.text(
+        (
+            (width - footer_width) // 2,
+            height - 65
+        ),
+        footer,
+        font=footer_font,
+        fill="white",
+        stroke_width=2,
+        stroke_fill="black"
+    )
 
-        footer_height = int(
-            height * 0.065
+    # --------------------------------------------------------
+    # SLIDE NUMBER
+    # --------------------------------------------------------
+
+    if (
+        slide_number
+        and
+        total_slides
+    ):
+
+        number_font = get_font(
+            24
         )
 
-        draw.rectangle(
-            [
-                0,
-                height - footer_height,
-                width,
-                height
-            ],
-            fill=(15, 25, 40)
-        )
-
-        footer_text = (
-            f"{CHANNEL_NICHE} • {YOUR_NAME}"
+        number_text = (
+            f"{slide_number}/"
+            f"{total_slides}"
         )
 
         draw.text(
             (
                 35,
-                height
-                - footer_height
-                + 15
+                30
             ),
-            footer_text,
-            font=footer_font,
-            fill=(180, 180, 180)
+            number_text,
+            font=number_font,
+            fill="white",
+            stroke_width=2,
+            stroke_fill="black"
         )
 
-        if total_slides > 0:
-
-            slide_text = (
-                f"{slide_number} / {total_slides}"
-            )
-
-            bbox = draw.textbbox(
-                (0, 0),
-                slide_text,
-                font=footer_font
-            )
-
-            text_width = (
-                bbox[2] - bbox[0]
-            )
-
-            draw.text(
-                (
-                    width
-                    - text_width
-                    - 35,
-                    height
-                    - footer_height
-                    + 15
-                ),
-                slide_text,
-                font=footer_font,
-                fill=(180, 180, 180)
-            )
-
-    # ========================================================
+    # --------------------------------------------------------
     # SAVE
-    # ========================================================
+    # --------------------------------------------------------
 
-    if is_thumbnail:
+    if slide_number is None:
 
-        file_prefix = "thumbnail"
-
-    else:
-
-        file_prefix = (
-            f"slide_{slide_number:02d}"
-        )
+        slide_number = 1
 
     path = (
-        output_dir
-        / f"{file_prefix}.png"
+        output_dir /
+        f"slide_{slide_number:02d}.png"
     )
 
-    final_bg.save(
+    image.save(
         path,
-        quality=95
+        "PNG"
     )
 
     print(
-        f"🖼️ Created visual: {path}"
+        f"🖼️ Slide created: "
+        f"{path}"
     )
 
-    return str(path)
+    return path
 
 
 # ============================================================
-# VIDEO CREATOR
+# VTT TIME PARSER
+# ============================================================
+
+def vtt_time_to_seconds(
+    value
+):
+
+    value = value.strip()
+
+    parts = value.split(":")
+
+    if len(parts) == 3:
+
+        hours = float(
+            parts[0]
+        )
+
+        minutes = float(
+            parts[1]
+        )
+
+        seconds = float(
+            parts[2]
+        )
+
+    elif len(parts) == 2:
+
+        hours = 0
+
+        minutes = float(
+            parts[0]
+        )
+
+        seconds = float(
+            parts[1]
+        )
+
+    else:
+
+        return 0.0
+
+    return (
+        hours * 3600
+        +
+        minutes * 60
+        +
+        seconds
+    )
+
+
+# ============================================================
+# PARSE VTT
+# ============================================================
+
+def parse_vtt(
+    vtt_path
+):
+
+    path = Path(
+        vtt_path
+    )
+
+    if not path.exists():
+
+        return []
+
+    try:
+
+        text = path.read_text(
+            encoding="utf-8"
+        )
+
+    except Exception:
+
+        return []
+
+    pattern = re.compile(
+        r"(\d{1,2}:\d{2}:\d{2}\.\d{3}"
+        r"|\d{1,2}:\d{2}\.\d{3})"
+        r"\s+-->\s+"
+        r"(\d{1,2}:\d{2}:\d{2}\.\d{3}"
+        r"|\d{1,2}:\d{2}\.\d{3})"
+        r"\s*\n"
+        r"(.+?)(?=\n\n|\Z)",
+        re.DOTALL
+    )
+
+    results = []
+
+    for match in pattern.finditer(
+        text
+    ):
+
+        start_text = match.group(
+            1
+        )
+
+        end_text = match.group(
+            2
+        )
+
+        caption = match.group(
+            3
+        ).strip()
+
+        caption = re.sub(
+            r"<[^>]+>",
+            "",
+            caption
+        )
+
+        caption = re.sub(
+            r"\s+",
+            " ",
+            caption
+        ).strip()
+
+        if not caption:
+
+            continue
+
+        start = vtt_time_to_seconds(
+            start_text
+        )
+
+        end = vtt_time_to_seconds(
+            end_text
+        )
+
+        if end <= start:
+
+            continue
+
+        results.append(
+            {
+                "start": start,
+                "end": end,
+                "text": caption
+            }
+        )
+
+    return results
+
+
+# ============================================================
+# FALLBACK TIMINGS
+# ============================================================
+
+def create_fallback_timings(
+    text,
+    duration
+):
+
+    words = str(
+        text or ""
+    ).split()
+
+    if not words:
+
+        return []
+
+    chunks = []
+
+    for i in range(
+        0,
+        len(words),
+        WORDS_PER_HIGHLIGHT
+    ):
+
+        chunk = " ".join(
+            words[
+                i:i +
+                WORDS_PER_HIGHLIGHT
+            ]
+        )
+
+        chunks.append(
+            chunk
+        )
+
+    total_words = max(
+        1,
+        len(words)
+    )
+
+    timings = []
+
+    current = 0.0
+
+    for chunk in chunks:
+
+        count = len(
+            chunk.split()
+        )
+
+        chunk_duration = (
+            duration *
+            count /
+            total_words
+        )
+
+        timings.append(
+            {
+                "start": current,
+                "end": (
+                    current +
+                    chunk_duration
+                ),
+                "text": chunk
+            }
+        )
+
+        current += chunk_duration
+
+    return timings
+
+
+# ============================================================
+# GET TEXT TIMINGS
+# ============================================================
+
+def get_text_timings(
+    script,
+    audio_path
+):
+
+    audio = AudioSegment.from_file(
+        audio_path
+    )
+
+    duration = (
+        len(audio) /
+        1000.0
+    )
+
+    timing_path = Path(
+        audio_path
+    ).with_suffix(
+        ".timing.vtt"
+    )
+
+    timings = parse_vtt(
+        timing_path
+    )
+
+    if not timings:
+
+        print(
+            "⚠️ VTT timing unavailable."
+        )
+
+        print(
+            "🔄 Using estimated speech timing."
+        )
+
+        return create_fallback_timings(
+            script,
+            duration
+        )
+
+    cleaned = []
+
+    for item in timings:
+
+        text = re.sub(
+            r"\s+",
+            " ",
+            item["text"]
+        ).strip()
+
+        if not text:
+
+            continue
+
+        start = max(
+            0,
+            item["start"]
+        )
+
+        end = min(
+            duration,
+            item["end"]
+        )
+
+        if end <= start:
+
+            continue
+
+        cleaned.append(
+            {
+                "start": start,
+                "end": end,
+                "text": text
+            }
+        )
+
+    if not cleaned:
+
+        return create_fallback_timings(
+            script,
+            duration
+        )
+
+    return cleaned
+
+
+# ============================================================
+# CURRENT TEXT CHUNK
+# ============================================================
+
+def get_current_timing(
+    timings,
+    current_time
+):
+
+    if not timings:
+
+        return None
+
+    for item in timings:
+
+        if (
+            item["start"]
+            <= current_time
+            <= item["end"]
+        ):
+
+            return item
+
+    return None
+
+
+# ============================================================
+# ANIMATED TEXT FRAME
+# ============================================================
+
+def make_animated_frame(
+    base_image,
+    timings,
+    current_time,
+    video_type
+):
+
+    frame = base_image.copy()
+
+    width, height = frame.size
+
+    draw = ImageDraw.Draw(
+        frame
+    )
+
+    # --------------------------------------------------------
+    # Position / font
+    # --------------------------------------------------------
+
+    if video_type == "short":
+
+        text_font = get_font(
+            68
+        )
+
+        max_width = int(
+            width * 0.82
+        )
+
+        text_center_y = int(
+            height * 0.46
+        )
+
+        line_height = 84
+
+    else:
+
+        text_font = get_font(
+            64
+        )
+
+        max_width = int(
+            width * 0.78
+        )
+
+        text_center_y = int(
+            height * 0.47
+        )
+
+        line_height = 78
+
+    current = get_current_timing(
+        timings,
+        current_time
+    )
+
+    if current is None:
+
+        return frame
+
+    text = current["text"]
+
+    # --------------------------------------------------------
+    # Animation progress
+    # --------------------------------------------------------
+
+    local_time = (
+        current_time -
+        current["start"]
+    )
+
+    progress = min(
+        1.0,
+        max(
+            0.0,
+            local_time /
+            TEXT_ANIMATION_IN
+        )
+    )
+
+    # Cubic ease out
+    eased = (
+        1 -
+        (1 - progress) ** 3
+    )
+
+    # Scale
+    scale = (
+        0.88 +
+        0.12 * eased
+    )
+
+    # Opacity
+    alpha = int(
+        255 * eased
+    )
+
+    # Slight vertical movement
+    movement = int(
+        20 *
+        (1 - eased)
+    )
+
+    # --------------------------------------------------------
+    # Text lines
+    # --------------------------------------------------------
+
+    lines = wrap_text(
+        draw,
+        text,
+        text_font,
+        max_width
+    )
+
+    total_height = (
+        len(lines) *
+        line_height
+    )
+
+    start_y = (
+        text_center_y -
+        total_height // 2
+        +
+        movement
+    )
+
+    # --------------------------------------------------------
+    # Transparent overlay
+    # --------------------------------------------------------
+
+    overlay = Image.new(
+        "RGBA",
+        (
+            width,
+            height
+        ),
+        (
+            0,
+            0,
+            0,
+            0
+        )
+    )
+
+    overlay_draw = ImageDraw.Draw(
+        overlay
+    )
+
+    y = start_y
+
+    for line in lines:
+
+        bbox = overlay_draw.textbbox(
+            (0, 0),
+            line,
+            font=text_font
+        )
+
+        text_width = (
+            bbox[2] -
+            bbox[0]
+        )
+
+        x = (
+            width -
+            text_width
+        ) // 2
+
+        # ----------------------------------------------------
+        # Highlight box
+        # ----------------------------------------------------
+
+        padding_x = 28
+        padding_y = 14
+
+        rect = (
+            x - padding_x,
+            y - padding_y,
+            x + text_width +
+            padding_x,
+            y +
+            line_height -
+            8
+        )
+
+        overlay_draw.rounded_rectangle(
+            rect,
+            radius=18,
+            fill=(
+                0,
+                0,
+                0,
+                int(
+                    175 *
+                    eased
+                )
+            )
+        )
+
+        # ----------------------------------------------------
+        # Text
+        # ----------------------------------------------------
+
+        overlay_draw.text(
+            (
+                x,
+                y
+            ),
+            line,
+            font=text_font,
+            fill=(
+                255,
+                220,
+                80,
+                alpha
+            ),
+            stroke_width=4,
+            stroke_fill=(
+                0,
+                0,
+                0,
+                alpha
+            )
+        )
+
+        y += line_height
+
+    # --------------------------------------------------------
+    # Scale animation
+    # --------------------------------------------------------
+
+    if abs(
+        scale - 1.0
+    ) > 0.001:
+
+        new_width = int(
+            width *
+            scale
+        )
+
+        new_height = int(
+            height *
+            scale
+        )
+
+        scaled = overlay.resize(
+            (
+                new_width,
+                new_height
+            ),
+            Image.Resampling.LANCZOS
+        )
+
+        centered = Image.new(
+            "RGBA",
+            (
+                width,
+                height
+            ),
+            (
+                0,
+                0,
+                0,
+                0
+            )
+        )
+
+        centered.alpha_composite(
+            scaled,
+            (
+                (
+                    width -
+                    new_width
+                ) // 2,
+                (
+                    height -
+                    new_height
+                ) // 2
+            )
+        )
+
+        overlay = centered
+
+    # --------------------------------------------------------
+    # Composite
+    # --------------------------------------------------------
+
+    frame = Image.alpha_composite(
+        frame.convert("RGBA"),
+        overlay
+    )
+
+    return frame.convert(
+        "RGB"
+    )
+
+
+# ============================================================
+# CREATE VIDEO
 # ============================================================
 
 def create_video(
     slide_paths,
     audio_paths,
     output_path,
-    video_type
+    video_type,
+    slide_scripts=None
 ):
     """
-    Creates final video from slides + Hindi voice.
-    Adds background music automatically.
+    Create final video.
+
+    slide_scripts:
+        Spoken script for each slide.
+
+    Text timing is generated from Edge TTS VTT
+    whenever available.
     """
 
-    print(
-        f"🎬 Creating {video_type} video..."
+    if not slide_paths:
+
+        raise ValueError(
+            "No slide paths supplied."
+        )
+
+    if not audio_paths:
+
+        raise ValueError(
+            "No audio paths supplied."
+        )
+
+    if len(slide_paths) != len(
+        audio_paths
+    ):
+
+        raise ValueError(
+            "Slide/audio count mismatch."
+        )
+
+    if slide_scripts is None:
+
+        slide_scripts = [
+            ""
+            for _ in slide_paths
+        ]
+
+    if len(slide_scripts) != len(
+        slide_paths
+    ):
+
+        raise ValueError(
+            "Slide/script count mismatch."
+        )
+
+    output_path = Path(
+        output_path
     )
 
-    try:
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-        # ----------------------------------------------------
-        # VALIDATION
-        # ----------------------------------------------------
+    print(
+        "\n🎬 ====================================="
+    )
 
-        if (
-            not slide_paths
-            or not audio_paths
-            or len(slide_paths)
-            != len(audio_paths)
-        ):
+    print(
+        "🎬 Creating animated motivational video"
+    )
 
-            raise ValueError(
-                "Mismatch between slides and audio clips."
-            )
+    print(
+        "🎬 ====================================="
+    )
 
-        # ----------------------------------------------------
-        # CREATE IMAGE CLIPS
-        # ----------------------------------------------------
+    clips = []
 
-        image_clips = []
+    voice_audio_clips = []
 
-        for i, (
-            img_path,
-            audio_path
-        ) in enumerate(
-            zip(
-                slide_paths,
-                audio_paths
-            )
-        ):
+    # ========================================================
+    # PROCESS EACH SLIDE
+    # ========================================================
 
-            print(
-                f"🎞️ Processing slide "
-                f"{i + 1}/{len(slide_paths)}..."
-            )
+    for index, (
+        slide_path,
+        audio_path,
+        script
+    ) in enumerate(
+        zip(
+            slide_paths,
+            audio_paths,
+            slide_scripts
+        )
+    ):
 
-            audio_clip = AudioFileClip(
-                str(audio_path)
-            )
-
-            # Small padding after speech
-            duration = (
-                audio_clip.duration
-                + 0.35
-            )
-
-            img_clip = (
-                ImageClip(img_path)
-                .set_duration(duration)
-                .set_audio(audio_clip)
-                .fadein(0.35)
-                .fadeout(0.35)
-            )
-
-            image_clips.append(
-                img_clip
-            )
-
-        # ----------------------------------------------------
-        # CONCATENATE
-        # ----------------------------------------------------
-
-        final_video = concatenate_videoclips(
-            image_clips,
-            method="compose"
+        print(
+            f"\n🎞️ Slide "
+            f"{index + 1}/"
+            f"{len(slide_paths)}"
         )
 
         # ----------------------------------------------------
-        # BACKGROUND MUSIC
+        # Audio
         # ----------------------------------------------------
 
-        if BACKGROUND_MUSIC_PATH.exists():
+        audio = AudioFileClip(
+            str(audio_path)
+        )
+
+        audio_duration = (
+            audio.duration
+        )
+
+        # Small breathing room
+        duration = (
+            audio_duration +
+            0.45
+        )
+
+        # ----------------------------------------------------
+        # Image
+        # ----------------------------------------------------
+
+        base_image = Image.open(
+            slide_path
+        ).convert(
+            "RGB"
+        )
+
+        # ----------------------------------------------------
+        # Text timings
+        # ----------------------------------------------------
+
+        timings = get_text_timings(
+            script,
+            audio_path
+        )
+
+        print(
+            f"📝 Text timing chunks: "
+            f"{len(timings)}"
+        )
+
+        # ----------------------------------------------------
+        # Frame function
+        # ----------------------------------------------------
+
+        def make_frame(
+            t,
+            base=base_image.copy(),
+            timing_data=timings,
+            vt=video_type
+        ):
+
+            if t >= audio_duration:
+
+                local_time = max(
+                    0,
+                    audio_duration -
+                    0.05
+                )
+
+            else:
+
+                local_time = t
+
+            return make_animated_frame(
+                base,
+                timing_data,
+                local_time,
+                vt
+            )
+
+        # ----------------------------------------------------
+        # MoviePy VideoClip
+        # ----------------------------------------------------
+
+        clip = VideoClip(
+            make_frame=make_frame,
+            duration=duration
+        )
+
+        clip = clip.set_audio(
+            audio
+        )
+
+        # ----------------------------------------------------
+        # Fade
+        # ----------------------------------------------------
+
+        clip = clip.fx(
+            vfx.fadein,
+            0.20
+        )
+
+        clip = clip.fx(
+            vfx.fadeout,
+            0.20
+        )
+
+        clips.append(
+            clip
+        )
+
+        voice_audio_clips.append(
+            audio
+        )
+
+    # ========================================================
+    # JOIN SLIDES
+    # ========================================================
+
+    print(
+        "\n🔗 Joining animated slides..."
+    )
+
+    final_video = concatenate_videoclips(
+        clips,
+        method="compose"
+    )
+
+    # ========================================================
+    # BACKGROUND MUSIC
+    # ========================================================
+
+    audio_layers = list(
+        voice_audio_clips
+    )
+
+    music = None
+    music_parts = []
+
+    if MUSIC_PATH.exists():
+
+        try:
 
             print(
                 "🎵 Adding background music..."
             )
 
-            bg_music = AudioFileClip(
-                str(BACKGROUND_MUSIC_PATH)
+            original_music = (
+                AudioFileClip(
+                    str(MUSIC_PATH)
+                )
             )
 
-            # Keep music quiet under voice
-            bg_music = (
-                bg_music
-                .volumex(0.07)
+            remaining = (
+                final_video.duration
             )
 
-            # Loop music
-            if (
-                bg_music.duration
-                < final_video.duration
-            ):
+            current = 0
 
-                bg_music = bg_music.fx(
-                    vfx.loop,
-                    duration=final_video.duration
+            while remaining > 0:
+
+                segment_duration = min(
+                    original_music.duration,
+                    remaining
                 )
 
-            else:
-
-                bg_music = bg_music.subclip(
-                    0,
-                    final_video.duration
-                )
-
-            # ------------------------------------------------
-            # AUDIO MIX
-            # ------------------------------------------------
-
-            if final_video.audio:
-
-                voice_audio = (
-                    final_video.audio
-                    .volumex(1.15)
-                )
-
-                composite_audio = (
-                    CompositeAudioClip(
-                        [
-                            voice_audio,
-                            bg_music
-                        ]
+                segment = (
+                    original_music
+                    .subclip(
+                        0,
+                        segment_duration
+                    )
+                    .volumex(
+                        BACKGROUND_MUSIC_VOLUME
                     )
                 )
 
-                final_video = (
-                    final_video
-                    .set_audio(
-                        composite_audio
+                music_parts.append(
+                    segment
+                )
+
+                remaining -= (
+                    segment.duration
+                )
+
+                current += (
+                    segment.duration
+                )
+
+            if music_parts:
+
+                if len(music_parts) == 1:
+
+                    music = music_parts[0]
+
+                else:
+
+                    music = (
+                        concatenate_audioclips(
+                            music_parts
+                        )
                     )
+
+                audio_layers.append(
+                    music
                 )
 
-            else:
-
-                final_video = (
-                    final_video
-                    .set_audio(bg_music)
-                )
-
-        else:
+        except Exception as e:
 
             print(
-                "⚠️ Background music not found:"
-                f" {BACKGROUND_MUSIC_PATH}"
+                f"⚠️ Background music "
+                f"failed: {e}"
             )
 
-            print(
-                "   Video will be generated "
-                "with voice only."
-            )
-
-        # ----------------------------------------------------
-        # EXPORT
-        # ----------------------------------------------------
-
-        final_video.write_videofile(
-            str(output_path),
-            fps=24,
-            codec="libx264",
-            audio_codec="aac",
-            audio_bitrate="192k",
-            preset="medium",
-            threads=4
-        )
+    else:
 
         print(
-            f"✅ {video_type.capitalize()} "
-            "video created successfully!"
+            f"ℹ️ Background music not found: "
+            f"{MUSIC_PATH}"
         )
 
-        # ----------------------------------------------------
-        # CLEANUP
-        # ----------------------------------------------------
+    # ========================================================
+    # FINAL AUDIO
+    # ========================================================
+
+    print(
+        "🎚️ Mixing voice + background music..."
+    )
+
+    mixed_audio = CompositeAudioClip(
+        audio_layers
+    )
+
+    final_video = final_video.set_audio(
+        mixed_audio
+    )
+
+    # ========================================================
+    # RENDER
+    # ========================================================
+
+    print(
+        "\n💾 Rendering MP4..."
+    )
+
+    print(
+        f"📁 Output: {output_path}"
+    )
+
+    final_video.write_videofile(
+        str(output_path),
+        fps=FPS,
+        codec="libx264",
+        audio_codec="aac",
+        preset="medium",
+        bitrate="5000k",
+        threads=2,
+        logger="bar"
+    )
+
+    # ========================================================
+    # CLEANUP
+    # ========================================================
+
+    print(
+        "\n🧹 Cleaning MoviePy resources..."
+    )
+
+    try:
+
+        final_video.close()
+
+    except Exception:
+
+        pass
+
+    for clip in clips:
 
         try:
 
-            final_video.close()
+            clip.close()
 
         except Exception:
 
             pass
 
-        for clip in image_clips:
+    for audio in voice_audio_clips:
 
-            try:
-                clip.close()
+        try:
 
-            except Exception:
-                pass
+            audio.close()
 
-    except Exception as e:
+        except Exception:
 
-        print(
-            "❌ ERROR during video creation:"
-            f" {e}"
-        )
+            pass
 
-        raise
+    if music:
+
+        try:
+
+            music.close()
+
+        except Exception:
+
+            pass
+
+    for part in music_parts:
+
+        try:
+
+            part.close()
+
+        except Exception:
+
+            pass
+
+    print(
+        "\n✅ ====================================="
+    )
+
+    print(
+        f"✅ VIDEO CREATED: {output_path}"
+    )
+
+    print(
+        "✅ ====================================="
+    )
+
+    return output_path
+
+
+# ============================================================
+# END
+# ============================================================
