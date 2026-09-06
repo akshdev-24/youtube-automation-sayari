@@ -109,36 +109,63 @@ def text_to_speech(text, output_path):
 def generate_curriculum(previous_titles=None):
     """Generates the entire course curriculum using Gemini."""
     print("🤖 No content plan found. Generating a new curriculum from scratch...")
+
     try:
         client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
-        #Optional: Add prior lesson titles for continuation
+        # Optional: Add prior lesson titles for continuation
         history = ""
-        if previous_titles:
-            formatted = "\n".join([f"{i+1}. {t}" for i, t in enumerate(previous_titles)])
-            history = f"The following lessons have already been created:\n{formatted}\n\nPlease continue from where this series left off.\n"
 
-                prompt = f"""
+        if previous_titles:
+            formatted = "\n".join(
+                [f"{i+1}. {t}" for i, t in enumerate(previous_titles)]
+            )
+            history = (
+                f"The following lessons have already been created:\n"
+                f"{formatted}\n\n"
+                f"Please continue from where this series left off.\n"
+            )
+
+        prompt = f"""
         You are an expert AI educator. Generate a curriculum for a YouTube series called 'AI for Developers by {YOUR_NAME}'.
+
         {history}
+
         The style must be: 'Assume the viewer is a beginner or non-technical person starting their journey into AI as a developer.
         Use simple real-world analogies, relatable examples, and then connect to technical concepts.'
 
         The curriculum must guide a developer from absolute beginner to advanced AI, covering foundations like Generative AI, LLMs, Vector Databases, and Agentic AI...
         ...then continue into deep AI topics like Reinforcement Learning, Transformers internals, multi-agent systems, tool use, LangGraph, AI architecture, and more.
 
-        Respond with ONLY a valid JSON object. The object must contain a key "lessons" which is a list of 20 lesson objects.
-        Each lesson object must have these keys: "chapter", "part", "title", "status" (defaulted to "pending"), and "youtube_id" (defaulted to null).
+        Respond with ONLY a valid JSON object.
+
+        The object must contain a key "lessons" which is a list of 20 lesson objects.
+
+        Each lesson object must have these keys:
+        "chapter",
+        "part",
+        "title",
+        "status" (defaulted to "pending"),
+        and "youtube_id" (defaulted to null).
         """
 
         response = client.models.generate_content(
             model="gemini-3.6-flash",
             contents=prompt
         )
-        json_string = response.text.strip().replace("```json", "").replace("```", "")
+
+        json_string = (
+            response.text
+            .strip()
+            .replace("```json", "")
+            .replace("```", "")
+        )
+
         curriculum = json.loads(json_string)
+
         print("✅ New curriculum generated successfully!")
         return curriculum
+
     except Exception as e:
         print(f"❌ CRITICAL ERROR: Failed to generate curriculum. {e}")
         raise
@@ -146,18 +173,33 @@ def generate_curriculum(previous_titles=None):
 
 def generate_lesson_content(lesson_title):
     """Generates the content for one long-form lesson and its promotional short."""
+
     print(f"🤖 Generating content for lesson: '{lesson_title}'...")
+
     try:
         client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+
         prompt = f"""
-        You are creating a lesson for the 'AI for Developers by {YOUR_NAME}' series. The topic is '{lesson_title}'.
+        You are creating a lesson for the 'AI for Developers by {YOUR_NAME}' series.
+        The topic is '{lesson_title}'.
+
         The style is: Assume the viewer is a beginner developer or non-tech person who wants to learn AI from scratch.
-        Use analogies and clear, simple language. Each concept must be explained from a developer's perspective, assuming no prior AI or ML knowledge.
+        Use analogies and clear, simple language.
+        Each concept must be explained from a developer's perspective, assuming no prior AI or ML knowledge.
 
         Generate a JSON response with three keys:
-        1. "long_form_slides": A list of 7 to 8 slide objects for a longer, more detailed main video. Each object needs a "title" and "content" key.
-        2. "short_form_highlight": A single, punchy, 1-2 sentence summary for a YouTube Short.
-        3. "hashtags": A string of 5-7 relevant, space-separated hashtags for this lesson (e.g., "#GenerativeAI #LLM #Developer","#NeuralNetworks #BeginnerAI #AIforDevelopers").
+
+        1. "long_form_slides":
+        A list of 7 to 8 slide objects for a longer, more detailed main video.
+        Each object needs a "title" and "content" key.
+
+        2. "short_form_highlight":
+        A single, punchy, 1-2 sentence summary for a YouTube Short.
+
+        3. "hashtags":
+        A string of 5-7 relevant, space-separated hashtags for this lesson.
+        Example:
+        "#GenerativeAI #LLM #Developer #NeuralNetworks #BeginnerAI #AIforDevelopers"
 
         Return only valid JSON.
         """
@@ -166,10 +208,19 @@ def generate_lesson_content(lesson_title):
             model="gemini-3.6-flash",
             contents=prompt
         )
-        json_string = response.text.strip().replace("```json", "").replace("```", "")
+
+        json_string = (
+            response.text
+            .strip()
+            .replace("```json", "")
+            .replace("```", "")
+        )
+
         content = json.loads(json_string)
+
         print("✅ Lesson content generated successfully.")
         return content
+
     except Exception as e:
         print(f"❌ ERROR: Failed to generate lesson content: {e}")
         raise
