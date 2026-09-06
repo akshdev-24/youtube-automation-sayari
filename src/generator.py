@@ -5,29 +5,23 @@
 # HINDI MOTIVATION YOUTUBE AUTOMATION
 #
 # Features:
-#   ✅ Gemini API
-#   ✅ Gemini 503/429/5xx retry
-#   ✅ Exponential backoff + jitter
-#   ✅ Edge TTS Hindi neural voice
-#   ✅ VTT timing support
-#   ✅ Reliable timing fallback
-#   ✅ Animated kinetic typography
-#   ✅ Speech-synced text highlighting
-#   ✅ Long-form videos
-#   ✅ YouTube Shorts
-#   ✅ Pexels visuals
-#   ✅ Cinematic background
-#   ✅ Background music
-#   ✅ Professional thumbnails
-#   ✅ Hindi / Devanagari font detection
-#   ✅ MoviePy NumPy frame fix
-#   ✅ GitHub Actions compatible
+#   Gemini API
+#   Gemini 503/429/5xx retry
+#   Edge TTS Hindi neural voice
+#   VTT timing support + fallback
+#   Animated kinetic typography
+#   Speech-synced text
+#   Long-form videos
+#   YouTube Shorts
+#   Pexels visuals
+#   Cinematic background
+#   Background music
+#   Professional thumbnails
+#   Hindi / Devanagari font detection
+#   MoviePy NumPy frame fix
+#   SAFE MOVIEPY AUDIO HANDLING
+#   GitHub Actions compatible
 #
-# ============================================================
-
-
-# ============================================================
-# IMPORTS
 # ============================================================
 
 import os
@@ -71,9 +65,9 @@ from pydub import AudioSegment
 ASSETS_PATH = Path("assets")
 
 MUSIC_PATH = (
-    ASSETS_PATH
-    / "music"
-    / "bg_music.mp3"
+    ASSETS_PATH /
+    "music" /
+    "bg_music.mp3"
 )
 
 YOUR_NAME = "Aksh Dev"
@@ -82,18 +76,15 @@ CHANNEL_NICHE = "Hindi Motivation"
 
 
 # ============================================================
-# GEMINI CONFIGURATION
+# GEMINI
 # ============================================================
 
 GEMINI_MODEL = "gemini-3.6-flash"
 
-# Number of attempts for temporary Gemini errors
 GEMINI_RETRIES = 6
 
-# Initial retry delay
 GEMINI_INITIAL_BACKOFF = 5
 
-# Maximum retry delay
 GEMINI_MAX_BACKOFF = 60
 
 
@@ -124,7 +115,7 @@ FPS = 24
 
 
 # ============================================================
-# TEXT ANIMATION
+# TEXT
 # ============================================================
 
 WORDS_PER_HIGHLIGHT = 3
@@ -147,32 +138,24 @@ MAX_TAGS = 25
 
 
 # ============================================================
-# FONT DETECTION
+# FONT
 # ============================================================
 
 def find_hindi_font():
 
     candidates = [
 
-        # ----------------------------------------------------
-        # Project fonts
-        # ----------------------------------------------------
+        ASSETS_PATH /
+        "fonts" /
+        "NotoSansDevanagari-Regular.ttf",
 
-        ASSETS_PATH
-        / "fonts"
-        / "NotoSansDevanagari-Regular.ttf",
+        ASSETS_PATH /
+        "fonts" /
+        "NotoSansDevanagari-Medium.ttf",
 
-        ASSETS_PATH
-        / "fonts"
-        / "NotoSansDevanagari-Medium.ttf",
-
-        ASSETS_PATH
-        / "fonts"
-        / "NotoSansDevanagari-Bold.ttf",
-
-        # ----------------------------------------------------
-        # Ubuntu / GitHub Actions
-        # ----------------------------------------------------
+        ASSETS_PATH /
+        "fonts" /
+        "NotoSansDevanagari-Bold.ttf",
 
         Path(
             "/usr/share/fonts/truetype/noto/"
@@ -203,10 +186,6 @@ def find_hindi_font():
             "/usr/share/fonts/opentype/noto/"
             "NotoSansDevanagari-Bold.ttf"
         ),
-
-        # ----------------------------------------------------
-        # Other Devanagari fonts
-        # ----------------------------------------------------
 
         Path(
             "/usr/share/fonts/truetype/"
@@ -214,22 +193,14 @@ def find_hindi_font():
             "Lohit-Devanagari.ttf"
         ),
 
-        # ----------------------------------------------------
-        # DejaVu fallback
-        # ----------------------------------------------------
-
         Path(
             "/usr/share/fonts/truetype/dejavu/"
             "DejaVuSans.ttf"
         ),
 
-        # ----------------------------------------------------
-        # Project fallback
-        # ----------------------------------------------------
-
-        ASSETS_PATH
-        / "fonts"
-        / "arial.ttf",
+        ASSETS_PATH /
+        "fonts" /
+        "arial.ttf",
     ]
 
     for font_path in candidates:
@@ -305,17 +276,6 @@ def get_gemini_client():
 
 def is_retryable_gemini_error(error):
 
-    """
-    Detect temporary Gemini API failures.
-
-    Retryable:
-        429 RESOURCE_EXHAUSTED
-        500 INTERNAL
-        502 BAD_GATEWAY
-        503 UNAVAILABLE
-        504 DEADLINE_EXCEEDED
-    """
-
     error_text = str(
         error
     ).upper()
@@ -341,13 +301,9 @@ def is_retryable_gemini_error(error):
     retryable_messages = [
 
         "429",
-
         "500",
-
         "502",
-
         "503",
-
         "504",
 
         "UNAVAILABLE",
@@ -376,42 +332,10 @@ def is_retryable_gemini_error(error):
 
 
 # ============================================================
-# GEMINI SAFE GENERATION
+# SAFE GEMINI GENERATION
 # ============================================================
 
-def generate_gemini_content(
-    prompt
-):
-    """
-    Safely call Gemini with automatic retries.
-
-    This protects GitHub Actions from temporary
-    Gemini 503 / 429 / 5xx failures.
-
-    Retry sequence example:
-
-        Attempt 1
-            ↓
-        5 sec
-            ↓
-        Attempt 2
-            ↓
-        10 sec
-            ↓
-        Attempt 3
-            ↓
-        20 sec
-            ↓
-        Attempt 4
-            ↓
-        40 sec
-            ↓
-        Attempt 5
-            ↓
-        60 sec
-            ↓
-        Attempt 6
-    """
+def generate_gemini_content(prompt):
 
     client = get_gemini_client()
 
@@ -435,8 +359,7 @@ def generate_gemini_content(
             )
 
             print(
-                f"🤖 Model: "
-                f"{GEMINI_MODEL}"
+                f"🤖 Model: {GEMINI_MODEL}"
             )
 
             print(
@@ -492,10 +415,6 @@ def generate_gemini_content(
                 "⚠️ ====================================="
             )
 
-            # ------------------------------------------------
-            # Non-retryable error
-            # ------------------------------------------------
-
             if not is_retryable_gemini_error(
                 error
             ):
@@ -506,10 +425,6 @@ def generate_gemini_content(
 
                 raise
 
-            # ------------------------------------------------
-            # Final attempt
-            # ------------------------------------------------
-
             if attempt >= GEMINI_RETRIES:
 
                 print(
@@ -519,13 +434,9 @@ def generate_gemini_content(
 
                 break
 
-            # ------------------------------------------------
-            # Exponential backoff
-            # ------------------------------------------------
-
             backoff = min(
-                GEMINI_INITIAL_BACKOFF
-                * (
+                GEMINI_INITIAL_BACKOFF *
+                (
                     2 ** (
                         attempt - 1
                     )
@@ -533,15 +444,14 @@ def generate_gemini_content(
                 GEMINI_MAX_BACKOFF
             )
 
-            # Random jitter
             jitter = random.uniform(
                 0,
                 3
             )
 
             wait_time = (
-                backoff
-                + jitter
+                backoff +
+                jitter
             )
 
             print(
@@ -569,9 +479,7 @@ def generate_gemini_content(
 # JSON CLEANER
 # ============================================================
 
-def clean_json_response(
-    text
-):
+def clean_json_response(text):
 
     if not text:
 
@@ -602,13 +510,9 @@ def clean_json_response(
         text
     )
 
-    start = text.find(
-        "{"
-    )
+    start = text.find("{")
 
-    end = text.rfind(
-        "}"
-    )
+    end = text.rfind("}")
 
     if start >= 0 and end >= 0:
 
@@ -616,13 +520,11 @@ def clean_json_response(
             start:end + 1
         ]
 
-    return json.loads(
-        text
-    )
+    return json.loads(text)
 
 
 # ============================================================
-# PEXELS IMAGE SEARCH
+# PEXELS
 # ============================================================
 
 def get_pexels_image(
@@ -651,25 +553,15 @@ def get_pexels_image(
     motivation_keywords = [
 
         "motivation",
-
         "success",
-
         "discipline",
-
         "focus",
-
         "confidence",
-
         "determination",
-
         "achievement",
-
         "journey",
-
         "dream",
-
         "hard work",
-
         "courage",
     ]
 
@@ -732,8 +624,10 @@ def get_pexels_image(
 
         image_url = (
             src.get("large2x")
-            or src.get("large")
-            or src.get("original")
+            or
+            src.get("large")
+            or
+            src.get("original")
         )
 
         if not image_url:
@@ -751,9 +645,7 @@ def get_pexels_image(
             BytesIO(
                 image_response.content
             )
-        ).convert(
-            "RGB"
-        )
+        ).convert("RGB")
 
     except Exception as e:
 
@@ -790,9 +682,7 @@ def create_fallback_background(
         image
     )
 
-    for y in range(
-        height
-    ):
+    for y in range(height):
 
         ratio = (
             y /
@@ -847,9 +737,7 @@ def prepare_background(
         height = LONG_HEIGHT
 
     image = get_pexels_image(
-        visual_query
-        or
-        "motivation",
+        visual_query or "motivation",
         video_type
     )
 
@@ -940,9 +828,7 @@ def prepare_background(
         overlay
     )
 
-    return image.convert(
-        "RGB"
-    )
+    return image.convert("RGB")
 
 
 # ============================================================
@@ -1251,11 +1137,8 @@ def text_to_speech(
                 if path.exists():
 
                     try:
-
                         path.unlink()
-
                     except Exception:
-
                         pass
 
             command = [
@@ -1291,8 +1174,7 @@ def text_to_speech(
             if result.returncode != 0:
 
                 raise RuntimeError(
-                    result.stderr
-                    or
+                    result.stderr or
                     "edge-tts command failed."
                 )
 
@@ -1379,10 +1261,7 @@ def wrap_text(
         ).strip()
 
         bbox = draw.textbbox(
-            (
-                0,
-                0
-            ),
+            (0, 0),
             test,
             font=font
         )
@@ -1416,7 +1295,7 @@ def wrap_text(
 
 
 # ============================================================
-# GENERATE VISUAL
+# GENERATE VISUALS
 # ============================================================
 
 def generate_visuals(
@@ -1455,13 +1334,9 @@ def generate_visuals(
             image
         )
 
-        title_font = get_font(
-            78
-        )
+        title_font = get_font(78)
 
-        brand_font = get_font(
-            32
-        )
+        brand_font = get_font(32)
 
         text = str(
             thumbnail_title
@@ -1470,8 +1345,7 @@ def generate_visuals(
         if len(text) > 80:
 
             text = (
-                text[:77]
-                +
+                text[:77] +
                 "..."
             )
 
@@ -1497,10 +1371,7 @@ def generate_visuals(
         for line in lines:
 
             bbox = draw.textbbox(
-                (
-                    0,
-                    0
-                ),
+                (0, 0),
                 line,
                 font=title_font
             )
@@ -1535,10 +1406,7 @@ def generate_visuals(
         )
 
         bbox = draw.textbbox(
-            (
-                0,
-                0
-            ),
+            (0, 0),
             brand,
             font=brand_font
         )
@@ -1564,8 +1432,7 @@ def generate_visuals(
         )
 
         path = (
-            output_dir
-            /
+            output_dir /
             "thumbnail.jpg"
         )
 
@@ -1577,8 +1444,7 @@ def generate_visuals(
         )
 
         print(
-            f"🖼️ Thumbnail created: "
-            f"{path}"
+            f"🖼️ Thumbnail created: {path}"
         )
 
         return path
@@ -1624,23 +1490,15 @@ def generate_visuals(
         image
     )
 
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
-
     if video_type == "short":
 
-        title_font = get_font(
-            58
-        )
+        title_font = get_font(58)
 
         title_y = 100
 
     else:
 
-        title_font = get_font(
-            58
-        )
+        title_font = get_font(58)
 
         title_y = 55
 
@@ -1648,10 +1506,7 @@ def generate_visuals(
         draw,
         title,
         title_font,
-        int(
-            width *
-            0.82
-        )
+        int(width * 0.82)
     )
 
     y = title_y
@@ -1659,10 +1514,7 @@ def generate_visuals(
     for line in title_lines:
 
         bbox = draw.textbbox(
-            (
-                0,
-                0
-            ),
+            (0, 0),
             line,
             font=title_font
         )
@@ -1691,13 +1543,7 @@ def generate_visuals(
 
         y += 72
 
-    # --------------------------------------------------------
-    # FOOTER
-    # --------------------------------------------------------
-
-    footer_font = get_font(
-        26
-    )
+    footer_font = get_font(26)
 
     footer = (
         f"{YOUR_NAME} • "
@@ -1705,10 +1551,7 @@ def generate_visuals(
     )
 
     bbox = draw.textbbox(
-        (
-            0,
-            0
-        ),
+        (0, 0),
         footer,
         font=footer_font
     )
@@ -1733,19 +1576,13 @@ def generate_visuals(
         stroke_fill="black"
     )
 
-    # --------------------------------------------------------
-    # SLIDE NUMBER
-    # --------------------------------------------------------
-
     if (
         slide_number
         and
         total_slides
     ):
 
-        number_font = get_font(
-            24
-        )
+        number_font = get_font(24)
 
         number_text = (
             f"{slide_number}/"
@@ -1764,17 +1601,12 @@ def generate_visuals(
             stroke_fill="black"
         )
 
-    # --------------------------------------------------------
-    # SAVE
-    # --------------------------------------------------------
-
     if slide_number is None:
 
         slide_number = 1
 
     path = (
-        output_dir
-        /
+        output_dir /
         f"slide_{slide_number:02d}.png"
     )
 
@@ -1784,64 +1616,43 @@ def generate_visuals(
     )
 
     print(
-        f"🖼️ Slide created: "
-        f"{path}"
+        f"🖼️ Slide created: {path}"
     )
 
     return path
 
 
 # ============================================================
-# VTT TIME PARSER
+# VTT TIME
 # ============================================================
 
-def vtt_time_to_seconds(
-    value
-):
+def vtt_time_to_seconds(value):
 
     value = value.strip()
 
-    parts = value.split(
-        ":"
-    )
+    parts = value.split(":")
 
     try:
 
         if len(parts) == 3:
 
-            hours = float(
-                parts[0]
-            )
-
-            minutes = float(
-                parts[1]
-            )
-
-            seconds = float(
-                parts[2]
-            )
+            hours = float(parts[0])
+            minutes = float(parts[1])
+            seconds = float(parts[2])
 
         elif len(parts) == 2:
 
             hours = 0
-
-            minutes = float(
-                parts[0]
-            )
-
-            seconds = float(
-                parts[1]
-            )
+            minutes = float(parts[0])
+            seconds = float(parts[1])
 
         else:
 
             return 0.0
 
         return (
-            hours * 3600
-            +
-            minutes * 60
-            +
+            hours * 3600 +
+            minutes * 60 +
             seconds
         )
 
@@ -1854,13 +1665,9 @@ def vtt_time_to_seconds(
 # PARSE VTT
 # ============================================================
 
-def parse_vtt(
-    vtt_path
-):
+def parse_vtt(vtt_path):
 
-    path = Path(
-        vtt_path
-    )
+    path = Path(vtt_path)
 
     if not path.exists():
 
@@ -1877,14 +1684,8 @@ def parse_vtt(
         return []
 
     text = (
-        text.replace(
-            "\r\n",
-            "\n"
-        )
-        .replace(
-            "\r",
-            "\n"
-        )
+        text.replace("\r\n", "\n")
+        .replace("\r", "\n")
     )
 
     pattern = re.compile(
@@ -1900,21 +1701,13 @@ def parse_vtt(
 
     results = []
 
-    for match in pattern.finditer(
-        text
-    ):
+    for match in pattern.finditer(text):
 
-        start_text = match.group(
-            1
-        )
+        start_text = match.group(1)
 
-        end_text = match.group(
-            2
-        )
+        end_text = match.group(2)
 
-        caption = match.group(
-            3
-        ).strip()
+        caption = match.group(3).strip()
 
         caption = re.sub(
             r"<[^>]+>",
@@ -1987,21 +1780,14 @@ def create_fallback_timings(
 
         chunk_words = words[
             i:
-            i +
-            WORDS_PER_HIGHLIGHT
+            i + WORDS_PER_HIGHLIGHT
         ]
 
-        chunk = " ".join(
-            chunk_words
-        )
-
         chunks.append(
-            chunk
+            " ".join(chunk_words)
         )
 
-    total_words = len(
-        words
-    )
+    total_words = len(words)
 
     timings = []
 
@@ -2037,15 +1823,13 @@ def create_fallback_timings(
 
     if timings:
 
-        timings[-1][
-            "end"
-        ] = duration
+        timings[-1]["end"] = duration
 
     return timings
 
 
 # ============================================================
-# GET TEXT TIMINGS
+# TEXT TIMINGS
 # ============================================================
 
 def get_text_timings(
@@ -2075,15 +1859,11 @@ def get_text_timings(
 
     timing_candidates = [
 
-        Path(
-            audio_path
-        ).with_suffix(
+        Path(audio_path).with_suffix(
             ".timing.vtt"
         ),
 
-        Path(
-            audio_path
-        ).with_suffix(
+        Path(audio_path).with_suffix(
             ".vtt"
         ),
     ]
@@ -2129,10 +1909,7 @@ def get_text_timings(
         text = re.sub(
             r"\s+",
             " ",
-            item.get(
-                "text",
-                ""
-            )
+            item.get("text", "")
         ).strip()
 
         if not text:
@@ -2192,7 +1969,7 @@ def get_text_timings(
 
 
 # ============================================================
-# CURRENT TEXT CHUNK
+# CURRENT TIMING
 # ============================================================
 
 def get_current_timing(
@@ -2230,7 +2007,7 @@ def get_current_timing(
 
 
 # ============================================================
-# ANIMATED TEXT FRAME
+# ANIMATED FRAME
 # ============================================================
 
 def make_animated_frame(
@@ -2244,42 +2021,32 @@ def make_animated_frame(
 
     width, height = frame.size
 
-    draw = ImageDraw.Draw(
-        frame
-    )
+    draw = ImageDraw.Draw(frame)
 
     if video_type == "short":
 
-        text_font = get_font(
-            68
-        )
+        text_font = get_font(68)
 
         max_width = int(
-            width *
-            0.82
+            width * 0.82
         )
 
         text_center_y = int(
-            height *
-            0.46
+            height * 0.46
         )
 
         line_height = 84
 
     else:
 
-        text_font = get_font(
-            64
-        )
+        text_font = get_font(64)
 
         max_width = int(
-            width *
-            0.78
+            width * 0.78
         )
 
         text_center_y = int(
-            height *
-            0.47
+            height * 0.47
         )
 
         line_height = 78
@@ -2291,9 +2058,7 @@ def make_animated_frame(
 
     if current is None:
 
-        return frame.convert(
-            "RGB"
-        )
+        return frame.convert("RGB")
 
     text = current.get(
         "text",
@@ -2302,9 +2067,7 @@ def make_animated_frame(
 
     if not text:
 
-        return frame.convert(
-            "RGB"
-        )
+        return frame.convert("RGB")
 
     local_time = (
         current_time -
@@ -2330,13 +2093,11 @@ def make_animated_frame(
 
     scale = (
         0.88 +
-        0.12 *
-        eased
+        0.12 * eased
     )
 
     alpha = int(
-        255 *
-        eased
+        255 * eased
     )
 
     movement = int(
@@ -2356,9 +2117,7 @@ def make_animated_frame(
 
     if not lines:
 
-        return frame.convert(
-            "RGB"
-        )
+        return frame.convert("RGB")
 
     total_height = (
         len(lines) *
@@ -2394,10 +2153,7 @@ def make_animated_frame(
     for line in lines:
 
         bbox = overlay_draw.textbbox(
-            (
-                0,
-                0
-            ),
+            (0, 0),
             line,
             font=text_font
         )
@@ -2416,19 +2172,10 @@ def make_animated_frame(
         padding_y = 14
 
         rect = (
-            x -
-            padding_x,
-
-            y -
-            padding_y,
-
-            x +
-            text_width +
-            padding_x,
-
-            y +
-            line_height -
-            8
+            x - padding_x,
+            y - padding_y,
+            x + text_width + padding_x,
+            y + line_height - 8
         )
 
         overlay_draw.rounded_rectangle(
@@ -2438,10 +2185,7 @@ def make_animated_frame(
                 0,
                 0,
                 0,
-                int(
-                    175 *
-                    eased
-                )
+                int(175 * eased)
             )
         )
 
@@ -2470,24 +2214,17 @@ def make_animated_frame(
         y += line_height
 
     if abs(
-        scale -
-        1.0
+        scale - 1.0
     ) > 0.001:
 
         new_width = max(
             1,
-            int(
-                width *
-                scale
-            )
+            int(width * scale)
         )
 
         new_height = max(
             1,
-            int(
-                height *
-                scale
-            )
+            int(height * scale)
         )
 
         scaled = overlay.resize(
@@ -2530,33 +2267,18 @@ def make_animated_frame(
         overlay = centered
 
     frame = Image.alpha_composite(
-        frame.convert(
-            "RGBA"
-        ),
+        frame.convert("RGBA"),
         overlay
     )
 
-    return frame.convert(
-        "RGB"
-    )
+    return frame.convert("RGB")
 
 
 # ============================================================
-# SAFE NUMPY FRAME CONVERSION
+# NUMPY FRAME
 # ============================================================
 
-def pil_to_numpy_frame(
-    image
-):
-
-    """
-    MoviePy VideoClip.make_frame MUST return
-    a NumPy ndarray.
-
-    Fixes:
-
-        AttributeError: shape
-    """
+def pil_to_numpy_frame(image):
 
     if not isinstance(
         image,
@@ -2564,14 +2286,10 @@ def pil_to_numpy_frame(
     ):
 
         image = Image.fromarray(
-            np.asarray(
-                image
-            )
+            np.asarray(image)
         )
 
-    image = image.convert(
-        "RGB"
-    )
+    image = image.convert("RGB")
 
     array = np.asarray(
         image,
@@ -2594,6 +2312,184 @@ def pil_to_numpy_frame(
         )
 
     return array
+
+
+# ============================================================
+# SAFE AUDIO VALIDATION
+# ============================================================
+
+def validate_audio_file(
+    audio_path
+):
+
+    path = Path(audio_path)
+
+    if not path.exists():
+
+        raise FileNotFoundError(
+            f"Audio file not found: {path}"
+        )
+
+    if path.stat().st_size < 1024:
+
+        raise RuntimeError(
+            f"Audio file is too small or invalid: "
+            f"{path}"
+        )
+
+    try:
+
+        audio = AudioFileClip(
+            str(path)
+        )
+
+        duration = float(
+            audio.duration or 0
+        )
+
+        if duration <= 0:
+
+            audio.close()
+
+            raise RuntimeError(
+                f"Audio duration is invalid: "
+                f"{path}"
+            )
+
+        audio.close()
+
+        return duration
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"Could not validate audio "
+            f"{path}: {e}"
+        )
+
+
+# ============================================================
+# SAFE BACKGROUND MUSIC
+# ============================================================
+
+def create_background_music(
+    music_path,
+    target_duration
+):
+
+    """
+    Create background music safely.
+
+    IMPORTANT:
+    The source AudioFileClip stays open until
+    the final video rendering is finished.
+
+    We DO NOT close the source music reader early.
+    """
+
+    if not Path(
+        music_path
+    ).exists():
+
+        print(
+            f"ℹ️ Background music not found: "
+            f"{music_path}"
+        )
+
+        return None, None
+
+    try:
+
+        print(
+            "🎵 Loading background music..."
+        )
+
+        source_music = AudioFileClip(
+            str(music_path)
+        )
+
+        source_duration = float(
+            source_music.duration or 0
+        )
+
+        if source_duration <= 0:
+
+            source_music.close()
+
+            print(
+                "⚠️ Background music has "
+                "invalid duration."
+            )
+
+            return None, None
+
+        target_duration = float(
+            target_duration
+        )
+
+        parts = []
+
+        remaining = target_duration
+
+        while remaining > 0:
+
+            segment_duration = min(
+                source_duration,
+                remaining
+            )
+
+            part = (
+                source_music
+                .subclip(
+                    0,
+                    segment_duration
+                )
+                .volumex(
+                    BACKGROUND_MUSIC_VOLUME
+                )
+            )
+
+            parts.append(
+                part
+            )
+
+            remaining -= (
+                segment_duration
+            )
+
+        if not parts:
+
+            source_music.close()
+
+            return None, None
+
+        if len(parts) == 1:
+
+            music = parts[0]
+
+        else:
+
+            music = concatenate_audioclips(
+                parts
+            )
+
+        print(
+            f"✅ Background music prepared "
+            f"for {target_duration:.2f}s"
+        )
+
+        # Return BOTH music and source.
+        # Source MUST stay open during render.
+        return music, source_music
+
+    except Exception as e:
+
+        print(
+            f"⚠️ Background music failed: "
+            f"{e}"
+        )
+
+        return None, None
 
 
 # ============================================================
@@ -2620,11 +2516,7 @@ def create_video(
             "No audio paths supplied."
         )
 
-    if len(
-        slide_paths
-    ) != len(
-        audio_paths
-    ):
+    if len(slide_paths) != len(audio_paths):
 
         raise ValueError(
             "Slide/audio count mismatch."
@@ -2637,11 +2529,7 @@ def create_video(
             for _ in slide_paths
         ]
 
-    if len(
-        slide_scripts
-    ) != len(
-        slide_paths
-    ):
+    if len(slide_scripts) != len(slide_paths):
 
         raise ValueError(
             "Slide/script count mismatch."
@@ -2672,381 +2560,426 @@ def create_video(
 
     voice_audio_clips = []
 
+    music = None
+
+    music_source = None
+
+    music_parts = []
+
+    final_video = None
+
+    mixed_audio = None
+
     # ========================================================
     # PROCESS SLIDES
     # ========================================================
 
-    for index, (
-        slide_path,
-        audio_path,
-        script
-    ) in enumerate(
-        zip(
-            slide_paths,
-            audio_paths,
-            slide_scripts
-        )
-    ):
+    try:
 
-        print(
-            f"\n🎞️ Slide "
-            f"{index + 1}/"
-            f"{len(slide_paths)}"
-        )
-
-        # ----------------------------------------------------
-        # Audio
-        # ----------------------------------------------------
-
-        audio = AudioFileClip(
-            str(audio_path)
-        )
-
-        audio_duration = float(
-            audio.duration
-        )
-
-        duration = (
-            audio_duration +
-            0.45
-        )
-
-        # ----------------------------------------------------
-        # Image
-        # ----------------------------------------------------
-
-        base_image = Image.open(
-            slide_path
-        ).convert(
-            "RGB"
-        )
-
-        expected_size = (
-            (
-                SHORT_WIDTH,
-                SHORT_HEIGHT
+        for index, (
+            slide_path,
+            audio_path,
+            script
+        ) in enumerate(
+            zip(
+                slide_paths,
+                audio_paths,
+                slide_scripts
             )
-            if video_type == "short"
-            else
-            (
-                LONG_WIDTH,
-                LONG_HEIGHT
-            )
-        )
-
-        if (
-            base_image.size
-            !=
-            expected_size
         ):
-
-            base_image = base_image.resize(
-                expected_size,
-                Image.Resampling.LANCZOS
-            )
-
-        # ----------------------------------------------------
-        # Text timings
-        # ----------------------------------------------------
-
-        timings = get_text_timings(
-            script,
-            audio_path
-        )
-
-        print(
-            f"📝 Text timing chunks: "
-            f"{len(timings)}"
-        )
-
-        # ----------------------------------------------------
-        # Frame function
-        # ----------------------------------------------------
-
-        def make_frame(
-            t,
-            base=base_image.copy(),
-            timing_data=timings,
-            vt=video_type,
-            audio_len=audio_duration
-        ):
-
-            if t >= audio_len:
-
-                local_time = max(
-                    0.0,
-                    audio_len -
-                    0.05
-                )
-
-            else:
-
-                local_time = max(
-                    0.0,
-                    float(t)
-                )
-
-            pil_frame = make_animated_frame(
-                base,
-                timing_data,
-                local_time,
-                vt
-            )
-
-            return pil_to_numpy_frame(
-                pil_frame
-            )
-
-        # ----------------------------------------------------
-        # MoviePy VideoClip
-        # ----------------------------------------------------
-
-        clip = VideoClip(
-            make_frame=make_frame,
-            duration=duration
-        )
-
-        clip = clip.set_audio(
-            audio
-        )
-
-        # ----------------------------------------------------
-        # Fade
-        # ----------------------------------------------------
-
-        clip = clip.fx(
-            vfx.fadein,
-            0.20
-        )
-
-        clip = clip.fx(
-            vfx.fadeout,
-            0.20
-        )
-
-        clips.append(
-            clip
-        )
-
-        voice_audio_clips.append(
-            audio
-        )
-
-    # ========================================================
-    # JOIN SLIDES
-    # ========================================================
-
-    print(
-        "\n🔗 Joining animated slides..."
-    )
-
-    final_video = concatenate_videoclips(
-        clips,
-        method="compose"
-    )
-
-    # ========================================================
-    # BACKGROUND MUSIC
-    # ========================================================
-
-    audio_layers = list(
-        voice_audio_clips
-    )
-
-    music = None
-
-    music_parts = []
-
-    if MUSIC_PATH.exists():
-
-        try:
 
             print(
-                "🎵 Adding background music..."
+                f"\n🎞️ Slide "
+                f"{index + 1}/"
+                f"{len(slide_paths)}"
             )
 
-            original_music = AudioFileClip(
-                str(MUSIC_PATH)
+            # ------------------------------------------------
+            # Validate audio BEFORE MoviePy
+            # ------------------------------------------------
+
+            validate_audio_file(
+                audio_path
             )
 
-            remaining = (
-                final_video.duration
+            # ------------------------------------------------
+            # Load voice audio
+            # ------------------------------------------------
+
+            audio = AudioFileClip(
+                str(audio_path)
             )
 
-            while remaining > 0:
+            if audio.duration is None:
 
-                segment_duration = min(
-                    original_music.duration,
-                    remaining
+                audio.close()
+
+                raise RuntimeError(
+                    f"Audio duration unavailable: "
+                    f"{audio_path}"
                 )
 
-                segment = (
-                    original_music
-                    .subclip(
-                        0,
-                        segment_duration
+            audio_duration = float(
+                audio.duration
+            )
+
+            if audio_duration <= 0:
+
+                audio.close()
+
+                raise RuntimeError(
+                    f"Audio duration invalid: "
+                    f"{audio_path}"
+                )
+
+            duration = (
+                audio_duration +
+                0.45
+            )
+
+            print(
+                f"🔊 Audio duration: "
+                f"{audio_duration:.2f}s"
+            )
+
+            # ------------------------------------------------
+            # Image
+            # ------------------------------------------------
+
+            base_image = Image.open(
+                slide_path
+            ).convert("RGB")
+
+            expected_size = (
+
+                (
+                    SHORT_WIDTH,
+                    SHORT_HEIGHT
+                )
+
+                if video_type == "short"
+
+                else
+
+                (
+                    LONG_WIDTH,
+                    LONG_HEIGHT
+                )
+            )
+
+            if (
+                base_image.size
+                !=
+                expected_size
+            ):
+
+                base_image = base_image.resize(
+                    expected_size,
+                    Image.Resampling.LANCZOS
+                )
+
+            # ------------------------------------------------
+            # Timing
+            # ------------------------------------------------
+
+            timings = get_text_timings(
+                script,
+                audio_path
+            )
+
+            print(
+                f"📝 Text timing chunks: "
+                f"{len(timings)}"
+            )
+
+            # ------------------------------------------------
+            # Frame function
+            # ------------------------------------------------
+
+            def make_frame(
+                t,
+                base=base_image.copy(),
+                timing_data=timings,
+                vt=video_type,
+                audio_len=audio_duration
+            ):
+
+                if t >= audio_len:
+
+                    local_time = max(
+                        0.0,
+                        audio_len - 0.05
                     )
-                    .volumex(
-                        BACKGROUND_MUSIC_VOLUME
-                    )
-                )
-
-                music_parts.append(
-                    segment
-                )
-
-                remaining -= (
-                    segment.duration
-                )
-
-            if music_parts:
-
-                if len(
-                    music_parts
-                ) == 1:
-
-                    music = music_parts[0]
 
                 else:
 
-                    music = concatenate_audioclips(
-                        music_parts
+                    local_time = max(
+                        0.0,
+                        float(t)
                     )
 
-                audio_layers.append(
-                    music
+                pil_frame = make_animated_frame(
+                    base,
+                    timing_data,
+                    local_time,
+                    vt
                 )
+
+                return pil_to_numpy_frame(
+                    pil_frame
+                )
+
+            # ------------------------------------------------
+            # Video clip
+            # ------------------------------------------------
+
+            clip = VideoClip(
+                make_frame=make_frame,
+                duration=duration
+            )
+
+            clip = clip.set_audio(
+                audio
+            )
+
+            clip = clip.fx(
+                vfx.fadein,
+                0.20
+            )
+
+            clip = clip.fx(
+                vfx.fadeout,
+                0.20
+            )
+
+            clips.append(
+                clip
+            )
+
+            # IMPORTANT:
+            # Keep this AudioFileClip open until
+            # rendering has completely finished.
+            voice_audio_clips.append(
+                audio
+            )
+
+        # ====================================================
+        # JOIN SLIDES
+        # ====================================================
+
+        print(
+            "\n🔗 Joining animated slides..."
+        )
+
+        final_video = concatenate_videoclips(
+            clips,
+            method="compose"
+        )
+
+        print(
+            f"⏱️ Final video duration: "
+            f"{final_video.duration:.2f}s"
+        )
+
+        # ====================================================
+        # BACKGROUND MUSIC
+        # ====================================================
+
+        audio_layers = list(
+            voice_audio_clips
+        )
+
+        music, music_source = (
+            create_background_music(
+                MUSIC_PATH,
+                final_video.duration
+            )
+        )
+
+        if music is not None:
+
+            audio_layers.append(
+                music
+            )
+
+        # ====================================================
+        # FINAL AUDIO
+        # ====================================================
+
+        print(
+            "🎚️ Mixing voice + background music..."
+        )
+
+        if not audio_layers:
+
+            raise RuntimeError(
+                "No valid audio layers available."
+            )
+
+        mixed_audio = CompositeAudioClip(
+            audio_layers
+        )
+
+        # Force exact final duration.
+        mixed_audio = mixed_audio.set_duration(
+            final_video.duration
+        )
+
+        final_video = final_video.set_audio(
+            mixed_audio
+        )
+
+        # ====================================================
+        # RENDER
+        # ====================================================
+
+        print(
+            "\n💾 Rendering MP4..."
+        )
+
+        print(
+            f"📁 Output: {output_path}"
+        )
+
+        final_video.write_videofile(
+            str(output_path),
+            fps=FPS,
+            codec="libx264",
+            audio_codec="aac",
+            preset="medium",
+            bitrate="5000k",
+            threads=2,
+            logger="bar"
+        )
+
+        # ====================================================
+        # VERIFY OUTPUT
+        # ====================================================
+
+        if not output_path.exists():
+
+            raise RuntimeError(
+                "MoviePy finished but MP4 "
+                "was not created."
+            )
+
+        output_size = (
+            output_path.stat().st_size
+        )
+
+        if output_size < 10000:
+
+            raise RuntimeError(
+                "Generated MP4 appears invalid "
+                f"or too small: {output_size} bytes"
+            )
+
+        print(
+            f"📦 MP4 size: "
+            f"{output_size / 1024 / 1024:.2f} MB"
+        )
+
+        print(
+            "\n✅ ====================================="
+        )
+
+        print(
+            f"✅ VIDEO CREATED: {output_path}"
+        )
+
+        print(
+            "✅ ====================================="
+        )
+
+        return output_path
+
+    finally:
+
+        # ====================================================
+        # CLEANUP
+        #
+        # VERY IMPORTANT:
+        # Cleanup happens AFTER write_videofile().
+        # Never close source audio before rendering.
+        # ====================================================
+
+        print(
+            "\n🧹 Cleaning MoviePy resources..."
+        )
+
+        if final_video is not None:
 
             try:
 
-                original_music.close()
+                final_video.close()
 
             except Exception:
 
                 pass
 
-        except Exception as e:
+        if mixed_audio is not None:
 
-            print(
-                f"⚠️ Background music "
-                f"failed: {e}"
-            )
+            try:
 
-    else:
+                mixed_audio.close()
+
+            except Exception:
+
+                pass
+
+        if music is not None:
+
+            try:
+
+                music.close()
+
+            except Exception:
+
+                pass
+
+        for part in music_parts:
+
+            try:
+
+                part.close()
+
+            except Exception:
+
+                pass
+
+        if music_source is not None:
+
+            try:
+
+                music_source.close()
+
+            except Exception:
+
+                pass
+
+        for clip in clips:
+
+            try:
+
+                clip.close()
+
+            except Exception:
+
+                pass
+
+        for audio in voice_audio_clips:
+
+            try:
+
+                audio.close()
+
+            except Exception:
+
+                pass
 
         print(
-            f"ℹ️ Background music not found: "
-            f"{MUSIC_PATH}"
+            "🧹 MoviePy cleanup completed."
         )
-
-    # ========================================================
-    # FINAL AUDIO
-    # ========================================================
-
-    print(
-        "🎚️ Mixing voice + background music..."
-    )
-
-    mixed_audio = CompositeAudioClip(
-        audio_layers
-    )
-
-    final_video = final_video.set_audio(
-        mixed_audio
-    )
-
-    # ========================================================
-    # RENDER
-    # ========================================================
-
-    print(
-        "\n💾 Rendering MP4..."
-    )
-
-    print(
-        f"📁 Output: {output_path}"
-    )
-
-    final_video.write_videofile(
-        str(output_path),
-        fps=FPS,
-        codec="libx264",
-        audio_codec="aac",
-        preset="medium",
-        bitrate="5000k",
-        threads=2,
-        logger="bar"
-    )
-
-    # ========================================================
-    # CLEANUP
-    # ========================================================
-
-    print(
-        "\n🧹 Cleaning MoviePy resources..."
-    )
-
-    try:
-
-        final_video.close()
-
-    except Exception:
-
-        pass
-
-    for clip in clips:
-
-        try:
-
-            clip.close()
-
-        except Exception:
-
-            pass
-
-    for audio in voice_audio_clips:
-
-        try:
-
-            audio.close()
-
-        except Exception:
-
-            pass
-
-    if music:
-
-        try:
-
-            music.close()
-
-        except Exception:
-
-            pass
-
-    for part in music_parts:
-
-        try:
-
-            part.close()
-
-        except Exception:
-
-            pass
-
-    print(
-        "\n✅ ====================================="
-    )
-
-    print(
-        f"✅ VIDEO CREATED: {output_path}"
-    )
-
-    print(
-        "✅ ====================================="
-    )
-
-    return output_path
 
 
 # ============================================================
