@@ -1,144 +1,145 @@
 {
   "lessons": [
     {
+      "chapter": 1,
+      "part": 1,
+      "title": "जब कोई साथ न दे, तब खुद के सबसे बड़े दोस्त बनो | Solitude Motivation",
+      "status": "complete",
+      "youtube_id": "pvhAE8B8f_4",
+      "completed_at": "2026-09-06T07:49:19.026545Z"
+    },
+    {
+      "chapter": 2,
+      "part": 1,
+      "title": "रोज़ का 1% बदलाव आपकी ज़िंदगी बदल देगा | Power of Consistency",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 3,
+      "part": 1,
+      "title": "जब सब कुछ ख़त्म लगे, वहीं से असली शुरुआत होती है | Ultimate Comeback Motivation",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 4,
+      "part": 1,
+      "title": "रात को सोने से पहले ये बातें याद रखना | Late Night Overthinking Motivation",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
       "chapter": 5,
       "part": 1,
-      "title": "NLP: Teaching AI to Understand and Talk Like Us",
-      "status": "complete",
-      "youtube_id": "6o4R-dsD7HQ"
-    },
-    {
-      "chapter": 5,
-      "part": 2,
-      "title": "LLMs: AI's Super-Powered Storytellers and Problem Solvers",
-      "status": "complete",
-      "youtube_id": "Saok3rWi_fw"
-    },
-    {
-      "chapter": 5,
-      "part": 3,
-      "title": "Prompt Engineering: How to Ask AI the Right Questions for Amazing Answers",
-      "status": "complete",
-      "youtube_id": "r1W4dCG0Dxk"
-    },
-    {
-      "chapter": 5,
-      "part": 4,
-      "title": "Tokenization & Embeddings: AI Breaking Down Words and Finding Their Meaning",
-      "status": "complete",
-      "youtube_id": "VWPFzMAnGG0"
-    },
-    {
-      "chapter": 5,
-      "part": 5,
-      "title": "The Transformer: The AI Engine That Reads and Writes Like Never Before (Intro)",
-      "status": "complete",
-      "youtube_id": "drBSbRjq0D0"
+      "title": "अपनी वैल्यू पहचानो: लोगों के पीछे भागना बंद करो | Self Respect Motivation",
+      "status": "pending",
+      "youtube_id": null
     },
     {
       "chapter": 6,
       "part": 1,
-      "title": "Attention Mechanism: How AI Chooses What to Focus On (Transformers Deep Dive)",
-      "status": "complete",
-      "youtube_id": "Aoa8LHbInWI"
-    },
-    {
-      "chapter": 6,
-      "part": 2,
-      "title": "Fine-tuning LLMs: Turning a General AI into Your Expert Assistant",
-      "status": "complete",
-      "youtube_id": "Q3l92NQlrv8"
-    },
-    {
-      "chapter": 6,
-      "part": 3,
-      "title": "Vector Databases: Storing and Finding AI's Memories in a Flash",
-      "status": "complete",
-      "youtube_id": "7skS7D0heIE"
-    },
-    {
-      "chapter": 6,
-      "part": 4,
-      "title": "Retrieval Augmented Generation (RAG): AI That Uses Its Brain AND Its Books",
-      "status": "complete",
-      "youtube_id": "VEoFjHLOmlo"
-    },
-    {
-      "chapter": 6,
-      "part": 5,
-      "title": "Building a RAG Application: Creating Your Own Smart AI Assistant with External Data",
-      "status": "complete",
-      "youtube_id": "9g4Yo_wZ36E"
+      "title": "जब पढ़ाई में मन न लगे, तो अपनी परिस्थितियों को याद करो | Student Motivation",
+      "status": "pending",
+      "youtube_id": null
     },
     {
       "chapter": 7,
       "part": 1,
-      "title": "Agent Frameworks: Giving Your AI a \"Brain\" and Tools to Think and Act",
-      "status": "complete",
-      "youtube_id": "zZmmqRymtQE"
-    },
-    {
-      "chapter": 7,
-      "part": 2,
-      "title": "Advanced Tool Use: Equipping Your AI with Custom Superpowers via LangChain",
-      "status": "complete",
-      "youtube_id": "LfUWfVvR3dE"
-    },
-    {
-      "chapter": 7,
-      "part": 3,
-      "title": "Agent Reasoning & Planning: How AI Breaks Down Problems and Solves Them Step-by-Step",
-      "status": "complete",
-      "youtube_id": "o-xDOOiOSJU"
-    },
-    {
-      "chapter": 7,
-      "part": 4,
-      "title": "LangGraph: Designing AI That Thinks in Steps and Reacts to Changes",
-      "status": "complete",
-      "youtube_id": "jYjd6D61sI4"
-    },
-    {
-      "chapter": 7,
-      "part": 5,
-      "title": "Building Complex Agent Applications: Orchestrating an AI Team for Big Projects",
-      "status": "complete",
-      "youtube_id": "TubNE4v8v44"
+      "title": "सुबह उठकर सबसे पहले ये एक काम करो | Powerful Morning Motivation",
+      "status": "pending",
+      "youtube_id": null
     },
     {
       "chapter": 8,
       "part": 1,
-      "title": "RLHF: Teaching AI What We Really Want (The Secret Behind Amazing LLMs)",
-      "status": "complete",
-      "youtube_id": "co8ojDPa4os"
+      "title": "बिना किसी को बताए चुपचाप अपनी मंज़िल की तरफ बढ़ो | Silent Hard Work",
+      "status": "pending",
+      "youtube_id": null
     },
     {
-      "chapter": 8,
-      "part": 2,
-      "title": "Beyond the Transformer: Glimpsing AI's Next Brain Designs (Mixture of Experts)",
-      "status": "complete",
-      "youtube_id": "DJjyJEHjXZM"
+      "chapter": 9,
+      "part": 1,
+      "title": "धैर्य रखो, सही समय पर सब कुछ ठीक होगा | Power of Patience",
+      "status": "pending",
+      "youtube_id": null
     },
     {
-      "chapter": 8,
-      "part": 3,
-      "title": "Multi-Modal AI: AI That Understands More Than Just Words (Images, Audio, Video)",
-      "status": "complete",
-      "youtube_id": "LRWJ70vYRrI"
+      "chapter": 10,
+      "part": 1,
+      "title": "जब पूरी दुनिया को तुम पर शक हो, तब खुद पर भरोसा रखो | Self Confidence Motivation",
+      "status": "pending",
+      "youtube_id": null
     },
     {
-      "chapter": 8,
-      "part": 4,
-      "title": "Designing Scalable AI Systems: Building AI That Can Grow with Your Ambitions",
-      "status": "complete",
-      "youtube_id": "rJSxRjulWlI"
+      "chapter": 11,
+      "part": 1,
+      "title": "सारे डिस्ट्रैक्शन खत्म करो और अपने लक्ष्य पर ध्यान लगाओ | Focus Motivation",
+      "status": "pending",
+      "youtube_id": null
     },
     {
-      "chapter": 8,
-      "part": 5,
-      "title": "The Future of AI: What's Next for Autonomous Agents and Intelligent Systems",
-      "status": "complete",
-      "youtube_id": "UAAXTkDrmBU"
+      "chapter": 12,
+      "part": 1,
+      "title": "ज़िंदगी के 3 कड़वे सच जो आपको मजबूत बनाएंगे | Life Lessons",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 13,
+      "part": 1,
+      "title": "लोग क्या कहेंगे? इस डर को अपने दिमाग से हमेशा के लिए निकाल दो",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 14,
+      "part": 1,
+      "title": "ज़ीरो से दोबारा शुरुआत कैसे करें? | Rebuilding Your Life",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 15,
+      "part": 1,
+      "title": "नेगेटिव सोच को रोकें: अपने मन को शांत और मजबूत बनाने का तरीका",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 16,
+      "part": 1,
+      "title": "रिजेक्शन से डरना मत, इसे अपनी ढाल बनाओ | Overcoming Rejection",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 17,
+      "part": 1,
+      "title": "अगर सपने बड़े हैं, तो छोटे बहानों को खत्म करो | Chase Your Dreams",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 18,
+      "part": 1,
+      "title": "समय बर्बाद करना बंद करो, वरना पछताओगे | Time Value Motivation",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 19,
+      "part": 1,
+      "title": "अपने आंसुओं को अपनी ताकत बनाओ | Inner Strength Motivation",
+      "status": "pending",
+      "youtube_id": null
+    },
+    {
+      "chapter": 20,
+      "part": 1,
+      "title": "सफलता का एक ही नियम है: हार मत मानो | Never Give Up Motivation",
+      "status": "pending",
+      "youtube_id": null
     }
   ]
 }
