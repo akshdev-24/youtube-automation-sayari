@@ -4,9 +4,10 @@
 #
 # HINDI MOTIVATION YOUTUBE AUTOMATION
 #
-# Fixed version:
-#   ✅ MoviePy VideoClip NumPy frame fix
-#   ✅ No more AttributeError: shape
+# Features:
+#   ✅ Gemini API
+#   ✅ Gemini 503/429/5xx retry
+#   ✅ Exponential backoff + jitter
 #   ✅ Edge TTS Hindi neural voice
 #   ✅ VTT timing support
 #   ✅ Reliable timing fallback
@@ -19,6 +20,7 @@
 #   ✅ Background music
 #   ✅ Professional thumbnails
 #   ✅ Hindi / Devanagari font detection
+#   ✅ MoviePy NumPy frame fix
 #   ✅ GitHub Actions compatible
 #
 # ============================================================
@@ -69,9 +71,9 @@ from pydub import AudioSegment
 ASSETS_PATH = Path("assets")
 
 MUSIC_PATH = (
-    ASSETS_PATH /
-    "music" /
-    "bg_music.mp3"
+    ASSETS_PATH
+    / "music"
+    / "bg_music.mp3"
 )
 
 YOUR_NAME = "Aksh Dev"
@@ -80,10 +82,19 @@ CHANNEL_NICHE = "Hindi Motivation"
 
 
 # ============================================================
-# GEMINI
+# GEMINI CONFIGURATION
 # ============================================================
 
 GEMINI_MODEL = "gemini-3.6-flash"
+
+# Number of attempts for temporary Gemini errors
+GEMINI_RETRIES = 6
+
+# Initial retry delay
+GEMINI_INITIAL_BACKOFF = 5
+
+# Maximum retry delay
+GEMINI_MAX_BACKOFF = 60
 
 
 # ============================================================
@@ -95,6 +106,7 @@ TTS_LANGUAGE = "hi"
 TTS_VOICE = "hi-IN-MadhurNeural"
 
 TTS_RETRIES = 5
+
 TTS_BACKOFF = 5
 
 
@@ -142,20 +154,26 @@ def find_hindi_font():
 
     candidates = [
 
-        # Project font
-        ASSETS_PATH /
-        "fonts" /
-        "NotoSansDevanagari-Regular.ttf",
+        # ----------------------------------------------------
+        # Project fonts
+        # ----------------------------------------------------
 
-        ASSETS_PATH /
-        "fonts" /
-        "NotoSansDevanagari-Medium.ttf",
+        ASSETS_PATH
+        / "fonts"
+        / "NotoSansDevanagari-Regular.ttf",
 
-        ASSETS_PATH /
-        "fonts" /
-        "NotoSansDevanagari-Bold.ttf",
+        ASSETS_PATH
+        / "fonts"
+        / "NotoSansDevanagari-Medium.ttf",
 
+        ASSETS_PATH
+        / "fonts"
+        / "NotoSansDevanagari-Bold.ttf",
+
+        # ----------------------------------------------------
         # Ubuntu / GitHub Actions
+        # ----------------------------------------------------
+
         Path(
             "/usr/share/fonts/truetype/noto/"
             "NotoSansDevanagari-Regular.ttf"
@@ -176,22 +194,42 @@ def find_hindi_font():
             "NotoSansDevanagari-Medium.ttf"
         ),
 
-        # Other common Devanagari fonts
         Path(
             "/usr/share/fonts/truetype/noto/"
             "NotoSansDevanagari-Bold.ttf"
         ),
 
+        Path(
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansDevanagari-Bold.ttf"
+        ),
+
+        # ----------------------------------------------------
+        # Other Devanagari fonts
+        # ----------------------------------------------------
+
+        Path(
+            "/usr/share/fonts/truetype/"
+            "lohit-devanagari/"
+            "Lohit-Devanagari.ttf"
+        ),
+
+        # ----------------------------------------------------
         # DejaVu fallback
+        # ----------------------------------------------------
+
         Path(
             "/usr/share/fonts/truetype/dejavu/"
             "DejaVuSans.ttf"
         ),
 
+        # ----------------------------------------------------
         # Project fallback
-        ASSETS_PATH /
-        "fonts" /
-        "arial.ttf",
+        # ----------------------------------------------------
+
+        ASSETS_PATH
+        / "fonts"
+        / "arial.ttf",
     ]
 
     for font_path in candidates:
@@ -262,10 +300,278 @@ def get_gemini_client():
 
 
 # ============================================================
+# GEMINI ERROR DETECTION
+# ============================================================
+
+def is_retryable_gemini_error(error):
+
+    """
+    Detect temporary Gemini API failures.
+
+    Retryable:
+        429 RESOURCE_EXHAUSTED
+        500 INTERNAL
+        502 BAD_GATEWAY
+        503 UNAVAILABLE
+        504 DEADLINE_EXCEEDED
+    """
+
+    error_text = str(
+        error
+    ).upper()
+
+    status_code = getattr(
+        error,
+        "status_code",
+        None
+    )
+
+    retryable_status_codes = {
+        429,
+        500,
+        502,
+        503,
+        504,
+    }
+
+    if status_code in retryable_status_codes:
+
+        return True
+
+    retryable_messages = [
+
+        "429",
+
+        "500",
+
+        "502",
+
+        "503",
+
+        "504",
+
+        "UNAVAILABLE",
+
+        "RESOURCE_EXHAUSTED",
+
+        "INTERNAL",
+
+        "BAD_GATEWAY",
+
+        "DEADLINE_EXCEEDED",
+
+        "SERVICE UNAVAILABLE",
+
+        "HIGH DEMAND",
+
+        "TEMPORARILY UNAVAILABLE",
+
+        "OVERLOADED",
+    ]
+
+    return any(
+        message in error_text
+        for message in retryable_messages
+    )
+
+
+# ============================================================
+# GEMINI SAFE GENERATION
+# ============================================================
+
+def generate_gemini_content(
+    prompt
+):
+    """
+    Safely call Gemini with automatic retries.
+
+    This protects GitHub Actions from temporary
+    Gemini 503 / 429 / 5xx failures.
+
+    Retry sequence example:
+
+        Attempt 1
+            ↓
+        5 sec
+            ↓
+        Attempt 2
+            ↓
+        10 sec
+            ↓
+        Attempt 3
+            ↓
+        20 sec
+            ↓
+        Attempt 4
+            ↓
+        40 sec
+            ↓
+        Attempt 5
+            ↓
+        60 sec
+            ↓
+        Attempt 6
+    """
+
+    client = get_gemini_client()
+
+    last_error = None
+
+    for attempt in range(
+        1,
+        GEMINI_RETRIES + 1
+    ):
+
+        try:
+
+            print(
+                "\n🤖 ====================================="
+            )
+
+            print(
+                f"🤖 Gemini attempt "
+                f"{attempt}/"
+                f"{GEMINI_RETRIES}"
+            )
+
+            print(
+                f"🤖 Model: "
+                f"{GEMINI_MODEL}"
+            )
+
+            print(
+                "🤖 ====================================="
+            )
+
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt
+            )
+
+            if response is None:
+
+                raise RuntimeError(
+                    "Gemini returned None response."
+                )
+
+            response_text = getattr(
+                response,
+                "text",
+                None
+            )
+
+            if not response_text:
+
+                raise RuntimeError(
+                    "Gemini returned an empty response."
+                )
+
+            print(
+                "✅ Gemini response received."
+            )
+
+            return response
+
+        except Exception as error:
+
+            last_error = error
+
+            print(
+                "\n⚠️ ====================================="
+            )
+
+            print(
+                "⚠️ Gemini request failed"
+            )
+
+            print(
+                f"⚠️ Error: {error}"
+            )
+
+            print(
+                "⚠️ ====================================="
+            )
+
+            # ------------------------------------------------
+            # Non-retryable error
+            # ------------------------------------------------
+
+            if not is_retryable_gemini_error(
+                error
+            ):
+
+                print(
+                    "❌ Non-retryable Gemini error."
+                )
+
+                raise
+
+            # ------------------------------------------------
+            # Final attempt
+            # ------------------------------------------------
+
+            if attempt >= GEMINI_RETRIES:
+
+                print(
+                    "❌ Gemini failed after "
+                    f"{GEMINI_RETRIES} attempts."
+                )
+
+                break
+
+            # ------------------------------------------------
+            # Exponential backoff
+            # ------------------------------------------------
+
+            backoff = min(
+                GEMINI_INITIAL_BACKOFF
+                * (
+                    2 ** (
+                        attempt - 1
+                    )
+                ),
+                GEMINI_MAX_BACKOFF
+            )
+
+            # Random jitter
+            jitter = random.uniform(
+                0,
+                3
+            )
+
+            wait_time = (
+                backoff
+                + jitter
+            )
+
+            print(
+                "⏳ Gemini is temporarily "
+                "unavailable."
+            )
+
+            print(
+                f"🔄 Retrying in "
+                f"{wait_time:.1f} seconds..."
+            )
+
+            time.sleep(
+                wait_time
+            )
+
+    raise RuntimeError(
+        "Gemini API remained unavailable "
+        f"after {GEMINI_RETRIES} attempts. "
+        f"Last error: {last_error}"
+    )
+
+
+# ============================================================
 # JSON CLEANER
 # ============================================================
 
-def clean_json_response(text):
+def clean_json_response(
+    text
+):
 
     if not text:
 
@@ -273,7 +579,9 @@ def clean_json_response(text):
             "Gemini returned empty response."
         )
 
-    text = str(text).strip()
+    text = str(
+        text
+    ).strip()
 
     text = re.sub(
         r"^```json\s*",
@@ -294,8 +602,13 @@ def clean_json_response(text):
         text
     )
 
-    start = text.find("{")
-    end = text.rfind("}")
+    start = text.find(
+        "{"
+    )
+
+    end = text.rfind(
+        "}"
+    )
 
     if start >= 0 and end >= 0:
 
@@ -303,7 +616,9 @@ def clean_json_response(text):
             start:end + 1
         ]
 
-    return json.loads(text)
+    return json.loads(
+        text
+    )
 
 
 # ============================================================
@@ -336,15 +651,25 @@ def get_pexels_image(
     motivation_keywords = [
 
         "motivation",
+
         "success",
+
         "discipline",
+
         "focus",
+
         "confidence",
+
         "determination",
+
         "achievement",
+
         "journey",
+
         "dream",
+
         "hard work",
+
         "courage",
     ]
 
@@ -426,7 +751,9 @@ def get_pexels_image(
             BytesIO(
                 image_response.content
             )
-        ).convert("RGB")
+        ).convert(
+            "RGB"
+        )
 
     except Exception as e:
 
@@ -448,15 +775,24 @@ def create_fallback_background(
 
     image = Image.new(
         "RGB",
-        (width, height),
-        (10, 10, 16)
+        (
+            width,
+            height
+        ),
+        (
+            10,
+            10,
+            16
+        )
     )
 
     draw = ImageDraw.Draw(
         image
     )
 
-    for y in range(height):
+    for y in range(
+        height
+    ):
 
         ratio = (
             y /
@@ -511,7 +847,9 @@ def prepare_background(
         height = LONG_HEIGHT
 
     image = get_pexels_image(
-        visual_query or "motivation",
+        visual_query
+        or
+        "motivation",
         video_type
     )
 
@@ -615,8 +953,6 @@ def generate_curriculum(
     previous_titles=None
 ):
 
-    client = get_gemini_client()
-
     previous_titles = (
         previous_titles or []
     )
@@ -689,9 +1025,8 @@ Return ONLY valid JSON:
 }}
 """
 
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt
+    response = generate_gemini_content(
+        prompt
     )
 
     return clean_json_response(
@@ -706,8 +1041,6 @@ Return ONLY valid JSON:
 def generate_lesson_content(
     lesson_title
 ):
-
-    client = get_gemini_client()
 
     prompt = f"""
 You are an expert Hindi motivational
@@ -848,9 +1181,8 @@ Format:
 }}
 """
 
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt
+    response = generate_gemini_content(
+        prompt
     )
 
     return clean_json_response(
@@ -919,8 +1251,11 @@ def text_to_speech(
                 if path.exists():
 
                     try:
+
                         path.unlink()
+
                     except Exception:
+
                         pass
 
             command = [
@@ -1041,11 +1376,13 @@ def wrap_text(
 
         test = (
             f"{current} {word}"
-            .strip()
-        )
+        ).strip()
 
         bbox = draw.textbbox(
-            (0, 0),
+            (
+                0,
+                0
+            ),
             test,
             font=font
         )
@@ -1132,7 +1469,11 @@ def generate_visuals(
 
         if len(text) > 80:
 
-            text = text[:77] + "..."
+            text = (
+                text[:77]
+                +
+                "..."
+            )
 
         lines = wrap_text(
             draw,
@@ -1156,7 +1497,10 @@ def generate_visuals(
         for line in lines:
 
             bbox = draw.textbbox(
-                (0, 0),
+                (
+                    0,
+                    0
+                ),
                 line,
                 font=title_font
             )
@@ -1191,7 +1535,10 @@ def generate_visuals(
         )
 
         bbox = draw.textbbox(
-            (0, 0),
+            (
+                0,
+                0
+            ),
             brand,
             font=brand_font
         )
@@ -1203,7 +1550,10 @@ def generate_visuals(
 
         draw.text(
             (
-                (width - brand_width) // 2,
+                (
+                    width -
+                    brand_width
+                ) // 2,
                 650
             ),
             brand,
@@ -1214,7 +1564,8 @@ def generate_visuals(
         )
 
         path = (
-            output_dir /
+            output_dir
+            /
             "thumbnail.jpg"
         )
 
@@ -1298,7 +1649,8 @@ def generate_visuals(
         title,
         title_font,
         int(
-            width * 0.82
+            width *
+            0.82
         )
     )
 
@@ -1307,7 +1659,10 @@ def generate_visuals(
     for line in title_lines:
 
         bbox = draw.textbbox(
-            (0, 0),
+            (
+                0,
+                0
+            ),
             line,
             font=title_font
         )
@@ -1350,7 +1705,10 @@ def generate_visuals(
     )
 
     bbox = draw.textbbox(
-        (0, 0),
+        (
+            0,
+            0
+        ),
         footer,
         font=footer_font
     )
@@ -1362,7 +1720,10 @@ def generate_visuals(
 
     draw.text(
         (
-            (width - footer_width) // 2,
+            (
+                width -
+                footer_width
+            ) // 2,
             height - 65
         ),
         footer,
@@ -1412,7 +1773,8 @@ def generate_visuals(
         slide_number = 1
 
     path = (
-        output_dir /
+        output_dir
+        /
         f"slide_{slide_number:02d}.png"
     )
 
@@ -1439,7 +1801,9 @@ def vtt_time_to_seconds(
 
     value = value.strip()
 
-    parts = value.split(":")
+    parts = value.split(
+        ":"
+    )
 
     try:
 
@@ -1512,13 +1876,15 @@ def parse_vtt(
 
         return []
 
-    # Normalize line endings
-    text = text.replace(
-        "\r\n",
-        "\n"
-    ).replace(
-        "\r",
-        "\n"
+    text = (
+        text.replace(
+            "\r\n",
+            "\n"
+        )
+        .replace(
+            "\r",
+            "\n"
+        )
     )
 
     pattern = re.compile(
@@ -1620,7 +1986,9 @@ def create_fallback_timings(
     ):
 
         chunk_words = words[
-            i:i + WORDS_PER_HIGHLIGHT
+            i:
+            i +
+            WORDS_PER_HIGHLIGHT
         ]
 
         chunk = " ".join(
@@ -1667,10 +2035,11 @@ def create_fallback_timings(
 
         current = end
 
-    # Ensure final chunk reaches audio end
     if timings:
 
-        timings[-1]["end"] = duration
+        timings[-1][
+            "end"
+        ] = duration
 
     return timings
 
@@ -1706,11 +2075,15 @@ def get_text_timings(
 
     timing_candidates = [
 
-        Path(audio_path).with_suffix(
+        Path(
+            audio_path
+        ).with_suffix(
             ".timing.vtt"
         ),
 
-        Path(audio_path).with_suffix(
+        Path(
+            audio_path
+        ).with_suffix(
             ".vtt"
         ),
     ]
@@ -1733,10 +2106,6 @@ def get_text_timings(
                 )
 
                 break
-
-    # --------------------------------------------------------
-    # VTT fallback
-    # --------------------------------------------------------
 
     if not timings:
 
@@ -1802,10 +2171,6 @@ def get_text_timings(
             }
         )
 
-    # --------------------------------------------------------
-    # Ultimate fallback
-    # --------------------------------------------------------
-
     if not cleaned:
 
         print(
@@ -1849,10 +2214,6 @@ def get_current_timing(
 
             return item
 
-    # --------------------------------------------------------
-    # If between chunks, use nearest previous chunk
-    # --------------------------------------------------------
-
     previous = None
 
     for item in timings:
@@ -1887,10 +2248,6 @@ def make_animated_frame(
         frame
     )
 
-    # --------------------------------------------------------
-    # Position / font
-    # --------------------------------------------------------
-
     if video_type == "short":
 
         text_font = get_font(
@@ -1898,11 +2255,13 @@ def make_animated_frame(
         )
 
         max_width = int(
-            width * 0.82
+            width *
+            0.82
         )
 
         text_center_y = int(
-            height * 0.46
+            height *
+            0.46
         )
 
         line_height = 84
@@ -1914,11 +2273,13 @@ def make_animated_frame(
         )
 
         max_width = int(
-            width * 0.78
+            width *
+            0.78
         )
 
         text_center_y = int(
-            height * 0.47
+            height *
+            0.47
         )
 
         line_height = 78
@@ -1945,10 +2306,6 @@ def make_animated_frame(
             "RGB"
         )
 
-    # --------------------------------------------------------
-    # Animation progress
-    # --------------------------------------------------------
-
     local_time = (
         current_time -
         current["start"]
@@ -1965,26 +2322,30 @@ def make_animated_frame(
 
     eased = (
         1 -
-        (1 - progress) ** 3
+        (
+            1 -
+            progress
+        ) ** 3
     )
 
     scale = (
         0.88 +
-        0.12 * eased
+        0.12 *
+        eased
     )
 
     alpha = int(
-        255 * eased
+        255 *
+        eased
     )
 
     movement = int(
         20 *
-        (1 - eased)
+        (
+            1 -
+            eased
+        )
     )
-
-    # --------------------------------------------------------
-    # Text lines
-    # --------------------------------------------------------
 
     lines = wrap_text(
         draw,
@@ -2010,10 +2371,6 @@ def make_animated_frame(
         movement
     )
 
-    # --------------------------------------------------------
-    # Transparent overlay
-    # --------------------------------------------------------
-
     overlay = Image.new(
         "RGBA",
         (
@@ -2037,7 +2394,10 @@ def make_animated_frame(
     for line in lines:
 
         bbox = overlay_draw.textbbox(
-            (0, 0),
+            (
+                0,
+                0
+            ),
             line,
             font=text_font
         )
@@ -2056,10 +2416,16 @@ def make_animated_frame(
         padding_y = 14
 
         rect = (
-            x - padding_x,
-            y - padding_y,
-            x + text_width +
+            x -
             padding_x,
+
+            y -
+            padding_y,
+
+            x +
+            text_width +
+            padding_x,
+
             y +
             line_height -
             8
@@ -2103,22 +2469,25 @@ def make_animated_frame(
 
         y += line_height
 
-    # --------------------------------------------------------
-    # Scale animation
-    # --------------------------------------------------------
-
     if abs(
-        scale - 1.0
+        scale -
+        1.0
     ) > 0.001:
 
         new_width = max(
             1,
-            int(width * scale)
+            int(
+                width *
+                scale
+            )
         )
 
         new_height = max(
             1,
-            int(height * scale)
+            int(
+                height *
+                scale
+            )
         )
 
         scaled = overlay.resize(
@@ -2150,6 +2519,7 @@ def make_animated_frame(
                     width -
                     new_width
                 ) // 2,
+
                 (
                     height -
                     new_height
@@ -2159,12 +2529,10 @@ def make_animated_frame(
 
         overlay = centered
 
-    # --------------------------------------------------------
-    # Composite
-    # --------------------------------------------------------
-
     frame = Image.alpha_composite(
-        frame.convert("RGBA"),
+        frame.convert(
+            "RGBA"
+        ),
         overlay
     )
 
@@ -2180,11 +2548,12 @@ def make_animated_frame(
 def pil_to_numpy_frame(
     image
 ):
+
     """
     MoviePy VideoClip.make_frame MUST return
     a NumPy ndarray.
 
-    This fixes:
+    Fixes:
 
         AttributeError: shape
     """
@@ -2195,7 +2564,9 @@ def pil_to_numpy_frame(
     ):
 
         image = Image.fromarray(
-            np.asarray(image)
+            np.asarray(
+                image
+            )
         )
 
     image = image.convert(
@@ -2207,7 +2578,6 @@ def pil_to_numpy_frame(
         dtype=np.uint8
     )
 
-    # Make absolutely sure shape is H x W x 3
     if array.ndim != 3:
 
         raise ValueError(
@@ -2218,7 +2588,7 @@ def pil_to_numpy_frame(
     if array.shape[2] != 3:
 
         raise ValueError(
-            f"Video frame must have "
+            "Video frame must have "
             f"3 channels, got: "
             f"{array.shape}"
         )
@@ -2250,7 +2620,9 @@ def create_video(
             "No audio paths supplied."
         )
 
-    if len(slide_paths) != len(
+    if len(
+        slide_paths
+    ) != len(
         audio_paths
     ):
 
@@ -2265,7 +2637,9 @@ def create_video(
             for _ in slide_paths
         ]
 
-    if len(slide_scripts) != len(
+    if len(
+        slide_scripts
+    ) != len(
         slide_paths
     ):
 
@@ -2347,16 +2721,24 @@ def create_video(
             "RGB"
         )
 
-        # Force correct dimensions
         expected_size = (
-            SHORT_WIDTH,
-            SHORT_HEIGHT
-        ) if video_type == "short" else (
-            LONG_WIDTH,
-            LONG_HEIGHT
+            (
+                SHORT_WIDTH,
+                SHORT_HEIGHT
+            )
+            if video_type == "short"
+            else
+            (
+                LONG_WIDTH,
+                LONG_HEIGHT
+            )
         )
 
-        if base_image.size != expected_size:
+        if (
+            base_image.size
+            !=
+            expected_size
+        ):
 
             base_image = base_image.resize(
                 expected_size,
@@ -2404,29 +2786,12 @@ def create_video(
                     float(t)
                 )
 
-            # Create PIL frame
             pil_frame = make_animated_frame(
                 base,
                 timing_data,
                 local_time,
                 vt
             )
-
-            # =================================================
-            # CRITICAL FIX
-            # =================================================
-            #
-            # MoviePy requires NumPy ndarray here.
-            #
-            # Old:
-            #
-            # return pil_frame
-            #
-            # New:
-            #
-            # return np.ndarray
-            #
-            # =================================================
 
             return pil_to_numpy_frame(
                 pil_frame
@@ -2489,6 +2854,7 @@ def create_video(
     )
 
     music = None
+
     music_parts = []
 
     if MUSIC_PATH.exists():
@@ -2535,7 +2901,9 @@ def create_video(
 
             if music_parts:
 
-                if len(music_parts) == 1:
+                if len(
+                    music_parts
+                ) == 1:
 
                     music = music_parts[0]
 
@@ -2548,6 +2916,14 @@ def create_video(
                 audio_layers.append(
                     music
                 )
+
+            try:
+
+                original_music.close()
+
+            except Exception:
+
+                pass
 
         except Exception as e:
 
