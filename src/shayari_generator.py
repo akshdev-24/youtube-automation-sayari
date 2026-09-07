@@ -1,35 +1,77 @@
 # ============================================================
-# FILE: src/shayari_generator.py
+# FILE: src/shayari_video.py
 # ============================================================
 #
-# HINGLISH / ROMAN HINDI SHAYARI GENERATOR
+# HINGLISH / ROMAN HINDI SHAYARI SHORTS VIDEO GENERATOR
 #
-# Features:
-#   - Gemini API
-#   - JSON structured output
-#   - No function calling / AFC
-#   - 503 / 429 / 5xx retry
-#   - Automatic fallback Shayari
-#   - No Devanagari
-#   - Duplicate-content protection
-#   - SEO title / description / hashtags / tags
-#   - content_history.json support
+# OUTPUT:
+#   1080x1920
+#   9:16
+#
+# VIDEO:
+#   User background image/video
+#   User background music
+#   Static Roman Hindi Shayari
+#
+# NO:
+#   - TTS
+#   - voice
+#   - text animation
+#   - cream card
+#   - paper overlay
+#   - logo
+#   - @handle
+#   - footer
+#   - extra UI
 #
 # ============================================================
 
 from __future__ import annotations
 
-import json
-import logging
 import os
 import random
-import re
-import time
+import subprocess
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
-from google import genai
-from google.genai import types
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+WIDTH = 1080
+HEIGHT = 1920
+FPS = 30
+
+DEFAULT_DURATION = int(
+    os.getenv("SHAYARI_DURATION", "15")
+)
+
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".webm",
+    ".avi",
+}
+
+IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+}
+
+AUDIO_EXTENSIONS = {
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".aac",
+    ".ogg",
+}
 
 
 # ============================================================
@@ -38,1194 +80,1168 @@ from google.genai import types
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-HISTORY_FILE = ROOT_DIR / "content_history.json"
+ASSETS_DIR = ROOT_DIR / "assets"
+
+MUSIC_DIR = ASSETS_DIR / "music"
+
+FONTS_DIR = ASSETS_DIR / "fonts"
 
 
 # ============================================================
-# CONFIG
+# FONT SEARCH
 # ============================================================
 
-MODEL = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-3.6-flash",
-)
+def find_font(
+    candidates: list[str],
+    size: int,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
-API_KEY = os.getenv(
-    "GOOGLE_API_KEY"
-)
+    search_paths = []
 
-MAX_RETRIES = int(
-    os.getenv(
-        "GEMINI_RETRIES",
-        "3"
-    )
-)
-
-RETRY_BASE_DELAY = float(
-    os.getenv(
-        "GEMINI_RETRY_DELAY",
-        "3"
-    )
-)
-
-
-# ============================================================
-# LOGGING
-# ============================================================
-
-logger = logging.getLogger(
-    "shayari-generator"
-)
-
-
-# ============================================================
-# CLIENT
-# ============================================================
-
-_client = None
-
-
-def get_client():
-    """
-    Create Gemini client lazily.
-    """
-
-    global _client
-
-    if _client is not None:
-        return _client
-
-    if not API_KEY:
-        raise RuntimeError(
-            "GOOGLE_API_KEY environment variable is missing."
+    # User-provided fonts
+    for name in candidates:
+        search_paths.append(
+            FONTS_DIR / name
         )
 
-    _client = genai.Client(
-        api_key=API_KEY
-    )
-
-    return _client
-
-
-# ============================================================
-# FALLBACK SHAYARI
-# ============================================================
-#
-# These are ORIGINAL fallback lines.
-# They are used when Gemini is temporarily unavailable.
-#
-# ============================================================
-
-FALLBACK_SHAYARI = [
-
-    {
-        "shayari": (
-            "Kabhi kabhi kisi ki yaad bhi "
-            "kitni ajeeb hoti hai,\n"
-            "paas na hokar bhi dil ke "
-            "sabse kareeb hoti hai.\n\n"
-            "Hum use bhoolne ki koshish to karte hain,\n"
-            "magar har khamoshi mein "
-            "uski kami mehsoos hoti hai."
-        ),
-        "category": "yaad",
-        "style": "emotional",
-        "emotion": "quiet longing",
-        "title": (
-            "Uski Yaad Ab Bhi Hai 💔 | "
-            "Sad Shayari | Emotional Poetry"
-        ),
-    },
-
-    {
-        "shayari": (
-            "Tumse milna ek khoobsurat khwab tha,\n"
-            "tumhara bichhadna us khwab ka ant.\n\n"
-            "Ab na shikayat hai, na koi sawaal,\n"
-            "bas tumhari yaadon ka hai "
-            "mere paas ek kona sambhal."
-        ),
-        "category": "judai",
-        "style": "heartbreak",
-        "emotion": "quiet heartbreak",
-        "title": (
-            "Tumse Bichhad Kar 💔 | "
-            "Heart Touching Shayari"
-        ),
-    },
-
-    {
-        "shayari": (
-            "Intezaar karte karte shaam dhal gayi,\n"
-            "khamoshi se meri har baat badal gayi.\n\n"
-            "Tum aaye nahi, phir bhi yakeen raha,\n"
-            "shayad kisi mod par mulaqat hogi."
-        ),
-        "category": "intezaar",
-        "style": "romantic",
-        "emotion": "hopeful longing",
-        "title": (
-            "Intezaar Ab Bhi Hai 💔 | "
-            "Love Shayari | Hindi Poetry"
-        ),
-    },
-
-    {
-        "shayari": (
-            "Kuch rishte lafzon ke mohtaj nahi hote,\n"
-            "bas khamoshi mein samajh aa jaate hain.\n\n"
-            "Aur kuch log door hokar bhi,\n"
-            "dil se kabhi door nahi jaate."
-        ),
-        "category": "rishte",
-        "style": "deep",
-        "emotion": "warm nostalgia",
-        "title": (
-            "Kuch Log Door Hokar Bhi 💔 | "
-            "Deep Shayari"
-        ),
-    },
-
-    {
-        "shayari": (
-            "Humne mohabbat mein kuch nahi maanga,\n"
-            "bas tera saath maanga tha.\n\n"
-            "Tumne woh bhi waqt ke hawale kar diya,\n"
-            "aur humne use yaad bana kar rakh liya."
-        ),
-        "category": "mohabbat",
-        "style": "sad romantic",
-        "emotion": "lost love",
-        "title": (
-            "Bas Tera Saath Maanga Tha 💔 | "
-            "Love Shayari"
-        ),
-    },
-
-    {
-        "shayari": (
-            "Raat chup thi, chaand bhi tanha tha,\n"
-            "aur dil mein tera hi fasana tha.\n\n"
-            "Neend aankhon se door thi,\n"
-            "shayad yaadon ko aaj phir "
-            "tera bahaana tha."
-        ),
-        "category": "raat",
-        "style": "romantic",
-        "emotion": "nighttime longing",
-        "title": (
-            "Raat Aur Teri Yaad 💔 | "
-            "Romantic Shayari"
-        ),
-    },
-
-    {
-        "shayari": (
-            "Kuch baatein dil mein hi reh jaati hain,\n"
-            "kuch mulaqatein adhuri reh jaati hain.\n\n"
-            "Insaan chala jaata hai zindagi se,\n"
-            "magar uski yaadein wahi reh jaati hain."
-        ),
-        "category": "yaadein",
-        "style": "deep emotional",
-        "emotion": "nostalgia",
-        "title": (
-            "Kuch Baatein Adhuri Reh Gayi 💔 | "
-            "Deep Shayari"
-        ),
-    },
-
-    {
-        "shayari": (
-            "Ajeeb sa rishta tha tumse,\n"
-            "na paas reh sake, na door ja sake.\n\n"
-            "Tumhe chhodna bhi mumkin nahi tha,\n"
-            "aur tumhe paana bhi naseeb nahi tha."
-        ),
-        "category": "adhura_pyar",
-        "style": "heartbreak",
-        "emotion": "unfulfilled love",
-        "title": (
-            "Na Paas, Na Door 💔 | "
-            "Broken Heart Shayari"
-        ),
-    },
-]
-
-
-# ============================================================
-# CATEGORIES
-# ============================================================
-
-CATEGORIES = [
-    "mohabbat",
-    "ishq",
-    "intezaar",
-    "judai",
-    "yaad",
-    "tanhaai",
-    "dard",
-    "broken heart",
-    "adhura pyar",
-    "khamoshi",
-    "rishte",
-    "raat",
-    "nostalgia",
-]
-
-
-# ============================================================
-# SEO KEYWORDS
-# ============================================================
-
-SEO_TAGS = [
-    "shayari",
-    "hindi shayari",
-    "sad shayari",
-    "love shayari",
-    "heart touching shayari",
-    "emotional shayari",
-    "dard bhari shayari",
-    "deep shayari",
-    "romantic shayari",
-    "broken heart shayari",
-    "urdu poetry",
-    "poetry",
-    "hindi poetry",
-    "emotional poetry",
-    "heart touching poetry",
-    "sad poetry",
-    "love poetry",
-    "deep poetry",
-    "shayari shorts",
-    "shorts",
-]
-
-
-# ============================================================
-# HELPERS
-# ============================================================
-
-def contains_devanagari(text: str) -> bool:
-    """
-    Return True if Devanagari is found.
-    """
-
-    if not text:
-        return False
-
-    return bool(
-        re.search(
-            r"[\u0900-\u097F]",
-            text
-        )
-    )
-
-
-def clean_text(text: Any) -> str:
-    """
-    Normalize text safely.
-    """
-
-    if text is None:
-        return ""
-
-    return str(text).strip()
-
-
-def normalize_hashtags(
-    hashtags: Any
-) -> list[str]:
-    """
-    Normalize hashtags.
-    """
-
-    if isinstance(
-        hashtags,
-        str
-    ):
-        hashtags = re.split(
-            r"[\s,]+",
-            hashtags
-        )
-
-    if not isinstance(
-        hashtags,
-        list
-    ):
-        hashtags = []
-
-    result = []
-
-    for item in hashtags:
-
-        item = clean_text(item)
-
-        if not item:
-            continue
-
-        if not item.startswith("#"):
-            item = "#" + item
-
-        # Only simple hashtag characters.
-        item = re.sub(
-            r"[^#A-Za-z0-9_]",
-            "",
-            item
-        )
-
-        if item and item not in result:
-            result.append(item)
-
-    return result[:8]
-
-
-def normalize_tags(
-    tags: Any
-) -> list[str]:
-    """
-    Normalize YouTube tags.
-    """
-
-    if isinstance(
-        tags,
-        str
-    ):
-        tags = tags.split(",")
-
-    if not isinstance(
-        tags,
-        list
-    ):
-        tags = []
-
-    result = []
-
-    for item in tags:
-
-        item = clean_text(item)
-
-        if not item:
-            continue
-
-        if item not in result:
-            result.append(item)
-
-    # Add base SEO tags if missing.
-    for tag in SEO_TAGS:
-
-        if tag not in result:
-            result.append(tag)
-
-    return result[:30]
-
-
-def normalize_content(
-    data: dict
-) -> dict:
-    """
-    Convert Gemini response into the exact structure
-    expected by the rest of the application.
-    """
-
-    shayari = clean_text(
-        data.get("shayari")
-    )
-
-    title = clean_text(
-        data.get("title")
-    )
-
-    description = clean_text(
-        data.get("description")
-    )
-
-    category = clean_text(
-        data.get("category")
-    ) or "deep feelings"
-
-    style = clean_text(
-        data.get("style")
-    ) or "emotional"
-
-    emotion = clean_text(
-        data.get("emotion")
-    ) or "deep emotions"
-
-    hashtags = normalize_hashtags(
-        data.get("hashtags")
-    )
-
-    tags = normalize_tags(
-        data.get("tags")
-    )
-
-    # --------------------------------------------------------
-    # Required fallback metadata
-    # --------------------------------------------------------
-
-    if not title:
-        title = (
-            "Heart Touching Shayari 💔 | "
-            "Emotional Poetry | Shorts"
-        )
-
-    if not hashtags:
-        hashtags = [
-            "#Shayari",
-            "#SadShayari",
-            "#LoveShayari",
-            "#EmotionalShayari",
-            "#Shorts",
-        ]
-
-    if not description:
-        description = (
-            f"{title}\n\n"
-            "Heart touching Roman Hindi Shayari "
-            "and emotional poetry.\n\n"
-            "A collection of feelings, love, "
-            "yaadein and khamoshi."
-        )
-
-    return {
-        "shayari": shayari,
-        "title": title,
-        "description": description,
-        "hashtags": hashtags,
-        "tags": tags,
-        "category": category,
-        "style": style,
-        "emotion": emotion,
-    }
-
-
-# ============================================================
-# HISTORY
-# ============================================================
-
-def load_history() -> list[dict]:
-    """
-    Load previous generated content.
-    """
-
-    if not HISTORY_FILE.exists():
-        return []
-
-    try:
-
-        with open(
-            HISTORY_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            data = json.load(file)
-
-        if isinstance(
-            data,
-            list
-        ):
-            return data
-
-        if isinstance(
-            data,
-            dict
-        ):
-            return data.get(
-                "items",
-                []
-            )
-
-    except Exception as exc:
-
-        logger.warning(
-            "Could not read history: %s",
-            exc
-        )
-
-    return []
-
-
-def save_history(item: dict) -> None:
-    """
-    Append generated item to content_history.json.
-    """
-
-    history = load_history()
-
-    history.append(item)
-
-    # Keep history manageable.
-    history = history[-500:]
-
-    with open(
-        HISTORY_FILE,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            history,
-            file,
-            ensure_ascii=False,
-            indent=2
-        )
-
-
-def is_duplicate(
-    shayari: str,
-    history: list[dict]
-) -> bool:
-    """
-    Detect exact/near duplicate content.
-    """
-
-    normalized_new = re.sub(
-        r"\s+",
-        " ",
-        shayari.lower()
-    ).strip()
-
-    if not normalized_new:
-        return True
-
-    for item in history:
-
-        old = clean_text(
-            item.get("shayari")
-            or item.get("text")
-        )
-
-        normalized_old = re.sub(
-            r"\s+",
-            " ",
-            old.lower()
-        ).strip()
-
-        if not normalized_old:
-            continue
-
-        if normalized_new == normalized_old:
-            return True
-
-    return False
-
-
-# ============================================================
-# GEMINI PROMPT
-# ============================================================
-
-def build_prompt(
-    history: list[dict]
-) -> str:
-    """
-    Build the generation prompt.
-
-    We intentionally do NOT provide copyrighted text to copy.
-    """
-
-    recent_titles = []
-
-    for item in history[-20:]:
-
-        title = clean_text(
-            item.get("title")
-        )
-
-        if title:
-            recent_titles.append(
-                title
-            )
-
-    blocked_titles = "\n".join(
-        f"- {title}"
-        for title in recent_titles
-    )
-
-    category = random.choice(
-        CATEGORIES
-    )
-
-    return f"""
-You are an expert Hindi/Urdu poetry writer.
-
-Create ONE completely ORIGINAL Shayari for a YouTube Short.
-
-IMPORTANT LANGUAGE RULES:
-- Write ONLY in Roman Hindi / Hinglish.
-- Do NOT use Devanagari.
-- Do NOT write Urdu script.
-- Do NOT transliterate famous existing poetry.
-- Do NOT copy lines from any poet, book, website, song, movie or social-media post.
-- Create fresh original wording.
-
-STYLE:
-- Emotional.
-- Deep.
-- Natural.
-- Literary but easy to understand.
-- Suitable for a 15-second vertical Shayari Short.
-- Around 35 to 65 words.
-- Use 5 to 8 poetic lines.
-- Use blank lines between meaningful stanza blocks.
-- No emojis inside the Shayari itself.
-
-THEME:
-{category}
-
-The Shayari should feel like:
-- mohabbat
-- yaad
-- intezaar
-- khamoshi
-- judai
-- tanhaai
-- emotional distance
-
-Do not make it generic motivational content.
-
-TITLE:
-Create a short YouTube Shorts title.
-Roman Hindi + relevant SEO phrase.
-Do not make it excessively long.
-
-DESCRIPTION:
-Write a natural YouTube description.
-Mention the emotional/poetry theme naturally.
-Do NOT keyword-stuff.
-
-HASHTAGS:
-Give 5 to 7 relevant hashtags.
-
-TAGS:
-Give relevant YouTube search tags.
-Focus on Shayari, Hindi poetry, emotional poetry,
-love/sad poetry and Shorts.
-
-Return ONLY valid JSON matching the requested schema.
-
-RECENT TITLES TO AVOID:
-{blocked_titles}
-""".strip()
-
-
-# ============================================================
-# GEMINI REQUEST
-# ============================================================
-
-def request_gemini(
-    prompt: str
-) -> dict:
-    """
-    Request structured JSON from Gemini.
-
-    Important:
-    - No tools.
-    - No Google Search.
-    - No automatic function calling.
-    - JSON schema enforced.
-    """
-
-    client = get_client()
-
-    schema = {
-        "type": "OBJECT",
-        "properties": {
-            "shayari": {
-                "type": "STRING"
-            },
-            "title": {
-                "type": "STRING"
-            },
-            "description": {
-                "type": "STRING"
-            },
-            "hashtags": {
-                "type": "ARRAY",
-                "items": {
-                    "type": "STRING"
-                }
-            },
-            "tags": {
-                "type": "ARRAY",
-                "items": {
-                    "type": "STRING"
-                }
-            },
-            "category": {
-                "type": "STRING"
-            },
-            "style": {
-                "type": "STRING"
-            },
-            "emotion": {
-                "type": "STRING"
-            },
-        },
-        "required": [
-            "shayari",
-            "title",
-            "description",
-            "hashtags",
-            "tags",
-            "category",
-            "style",
-            "emotion",
-        ],
-    }
-
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=schema,
-            temperature=1.0,
-            max_output_tokens=1200,
-        ),
-    )
-
-    # --------------------------------------------------------
-    # Safely extract response text
-    # --------------------------------------------------------
-
-    text = ""
-
-    try:
-        text = response.text or ""
-    except Exception:
-        text = ""
-
-    text = text.strip()
-
-    if not text:
-        logger.warning(
-            "Gemini returned an empty text response."
-        )
-
-        # Try candidate parts directly.
-        try:
-
-            for candidate in (
-                response.candidates or []
-            ):
-
-                content = getattr(
-                    candidate,
-                    "content",
-                    None
-                )
-
-                if not content:
-                    continue
-
-                for part in (
-                    getattr(
-                        content,
-                        "parts",
-                        []
-                    )
-                    or []
-                ):
-
-                    part_text = getattr(
-                        part,
-                        "text",
-                        None
-                    )
-
-                    if part_text:
-                        text = str(
-                            part_text
-                        ).strip()
-
-                        break
-
-                if text:
-                    break
-
-        except Exception as exc:
-
-            logger.warning(
-                "Could not extract candidate text: %s",
-                exc
-            )
-
-    if not text:
-        raise ValueError(
-            "Gemini returned no usable text."
-        )
-
-    # --------------------------------------------------------
-    # Parse JSON
-    # --------------------------------------------------------
-
-    try:
-
-        data = json.loads(
-            text
-        )
-
-    except json.JSONDecodeError:
-
-        # Sometimes models may accidentally wrap JSON
-        # in markdown despite schema instructions.
-
-        cleaned = text
-
-        cleaned = re.sub(
-            r"^```json\s*",
-            "",
-            cleaned,
-            flags=re.IGNORECASE
-        )
-
-        cleaned = re.sub(
-            r"^```\s*",
-            "",
-            cleaned
-        )
-
-        cleaned = re.sub(
-            r"\s*```$",
-            "",
-            cleaned
-        )
-
-        try:
-
-            data = json.loads(
-                cleaned.strip()
-            )
-
-        except Exception as exc:
-
-            raise ValueError(
-                "Gemini returned invalid JSON."
-            ) from exc
-
-    if not isinstance(
-        data,
-        dict
-    ):
-        raise ValueError(
-            "Gemini JSON response is not an object."
-        )
-
-    return data
-
-
-# ============================================================
-# FALLBACK
-# ============================================================
-
-def get_fallback(
-    history: list[dict]
-) -> dict:
-    """
-    Return a guaranteed-valid original Shayari.
-    """
-
-    available = [
-        item
-        for item in FALLBACK_SHAYARI
-        if not is_duplicate(
-            item["shayari"],
-            history
-        )
+    # Linux fonts available on GitHub Actions
+    linux_fonts = [
+        "/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSerif-Italic.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
     ]
 
-    if not available:
+    # Windows
+    windows_fonts = [
+        "C:/Windows/Fonts/times.ttf",
+        "C:/Windows/Fonts/timesi.ttf",
+        "C:/Windows/Fonts/georgia.ttf",
+        "C:/Windows/Fonts/georgiai.ttf",
+    ]
 
-        # If all fallbacks were already used,
-        # choose randomly rather than returning empty data.
-        available = FALLBACK_SHAYARI
-
-    selected = random.choice(
-        available
+    search_paths.extend(
+        Path(p) for p in linux_fonts
     )
 
-    data = {
-        "shayari": selected["shayari"],
-        "title": selected["title"],
-        "description": (
-            f"{selected['title']}\n\n"
-            "Heart touching Roman Hindi Shayari "
-            "for anyone who has ever loved, waited "
-            "or silently missed someone.\n\n"
-            "Original emotional poetry."
-        ),
-        "hashtags": [
-            "#Shayari",
-            "#SadShayari",
-            "#LoveShayari",
-            "#EmotionalShayari",
-            "#HeartTouchingPoetry",
-            "#Shorts",
-        ],
-        "tags": SEO_TAGS.copy(),
-        "category": selected["category"],
-        "style": selected["style"],
-        "emotion": selected["emotion"],
-    }
-
-    return normalize_content(
-        data
+    search_paths.extend(
+        Path(p) for p in windows_fonts
     )
 
-
-# ============================================================
-# VALIDATION
-# ============================================================
-
-def validate_generated(
-    content: dict
-) -> None:
-    """
-    Make sure generated content is actually usable.
-    """
-
-    shayari = clean_text(
-        content.get("shayari")
-    )
-
-    if not shayari:
-        raise ValueError(
-            "Generated Shayari is empty."
-        )
-
-    title = clean_text(
-        content.get("title")
-    )
-
-    if not title:
-        raise ValueError(
-            "Generated title is empty."
-        )
-
-    # --------------------------------------------------------
-    # No Devanagari
-    # --------------------------------------------------------
-
-    for field in [
-        "shayari",
-        "title",
-        "description",
-    ]:
-
-        value = clean_text(
-            content.get(field)
-        )
-
-        if contains_devanagari(
-            value
-        ):
-            raise ValueError(
-                f"Devanagari detected in {field}."
-            )
-
-    # --------------------------------------------------------
-    # Minimum content quality
-    # --------------------------------------------------------
-
-    if len(shayari) < 25:
-        raise ValueError(
-            "Generated Shayari is too short."
-        )
-
-    if len(shayari) > 1200:
-        raise ValueError(
-            "Generated Shayari is too long."
-        )
-
-
-# ============================================================
-# PUBLIC GENERATOR
-# ============================================================
-
-def generate_shayari() -> dict:
-    """
-    Main public function used by main.py.
-
-    GUARANTEE:
-    This function either returns valid content or raises
-    a clear error. It will never return empty Shayari.
-    """
-
-    history = load_history()
-
-    prompt = build_prompt(
-        history
-    )
-
-    # --------------------------------------------------------
-    # Gemini attempts
-    # --------------------------------------------------------
-
-    for attempt in range(
-        1,
-        MAX_RETRIES + 1
-    ):
+    for path in search_paths:
 
         try:
 
-            logger.info(
-                "Gemini generation attempt %d/%d",
-                attempt,
-                MAX_RETRIES,
-            )
+            if path.exists():
 
-            raw = request_gemini(
-                prompt
-            )
-
-            content = normalize_content(
-                raw
-            )
-
-            validate_generated(
-                content
-            )
-
-            # Prevent duplicate Gemini output.
-            if is_duplicate(
-                content["shayari"],
-                history
-            ):
-
-                logger.warning(
-                    "Gemini generated duplicate content."
+                return ImageFont.truetype(
+                    str(path),
+                    size=size,
                 )
 
-                if attempt < MAX_RETRIES:
-                    continue
+        except Exception:
+            continue
 
-                raise ValueError(
-                    "Duplicate Shayari generated."
-                )
+    return ImageFont.load_default()
 
-            logger.info(
-                "Gemini Shayari generated successfully."
-            )
 
-            logger.info(
-                "Category: %s",
-                content["category"]
-            )
-
-            logger.info(
-                "Title: %s",
-                content["title"]
-            )
-
-            return content
-
-        except Exception as exc:
-
-            error_text = str(
-                exc
-            )
-
-            print(
-                f"⚠️ Shayari generation attempt "
-                f"{attempt}/{MAX_RETRIES} failed: "
-                f"{error_text}"
-            )
-
-            logger.warning(
-                "Gemini attempt %d failed: %s",
-                attempt,
-                exc
-            )
-
-            if attempt < MAX_RETRIES:
-
-                # Exponential backoff.
-                delay = (
-                    RETRY_BASE_DELAY
-                    * (2 ** (attempt - 1))
-                )
-
-                # Small jitter.
-                delay += random.uniform(
-                    0.5,
-                    1.5
-                )
-
-                logger.info(
-                    "Waiting %.1f seconds before retry...",
-                    delay
-                )
-
-                time.sleep(
-                    delay
-                )
-
-    # --------------------------------------------------------
-    # Gemini failed -> guaranteed fallback
-    # --------------------------------------------------------
-
-    logger.warning(
-        "Gemini generation failed."
+def get_body_font(size: int):
+    return find_font(
+        [
+            "body.ttf",
+            "serif.ttf",
+            "times.ttf",
+            "Times New Roman.ttf",
+            "Georgia.ttf",
+        ],
+        size,
     )
 
-    logger.warning(
-        "Using fallback Shayari."
-    )
 
-    fallback = get_fallback(
-        history
-    )
+# ============================================================
+# BACKGROUND DISCOVERY
+# ============================================================
 
-    # Final safety validation.
-    validate_generated(
-        fallback
-    )
+def find_background() -> Path:
 
-    print()
-    print("=" * 60)
-    print("NEW SHAYARI GENERATED")
-    print("=" * 60)
+    preferred_names = [
+        "background.jpg",
+        "background.jpeg",
+        "background.png",
+        "background.webp",
+        "bg.jpg",
+        "bg.jpeg",
+        "bg.png",
+        "bg.webp",
+        "background.mp4",
+        "background.mov",
+        "background.webm",
+        "bg.mp4",
+        "bg.mov",
+        "bg.webm",
+    ]
 
-    print(
-        fallback["shayari"]
-    )
+    for name in preferred_names:
 
-    print()
+        path = ASSETS_DIR / name
 
-    print(
-        f"Category: {fallback['category']}"
-    )
+        if path.exists():
 
-    print(
-        f"Style: {fallback['style']}"
-    )
+            return path
 
-    print(
-        f"Emotion: {fallback['emotion']}"
-    )
+    candidates = []
 
-    print()
+    for path in ASSETS_DIR.iterdir():
 
-    print(
-        f"TITLE:\n{fallback['title']}"
-    )
+        if not path.is_file():
+            continue
 
-    print()
+        if path.name.lower() == "fallback.jpg":
+            continue
 
-    print(
-        "HASHTAGS:\n"
-        + " ".join(
-            fallback["hashtags"]
+        if path.suffix.lower() in (
+            VIDEO_EXTENSIONS
+            | IMAGE_EXTENSIONS
+        ):
+
+            candidates.append(path)
+
+    if not candidates:
+
+        fallback = ASSETS_DIR / "fallback.jpg"
+
+        if fallback.exists():
+            return fallback
+
+        raise FileNotFoundError(
+            "No background image/video found in assets/"
         )
+
+    return random.choice(candidates)
+
+
+# ============================================================
+# MUSIC DISCOVERY
+# ============================================================
+
+def find_music() -> Path:
+
+    preferred = [
+        "bg_music.mp3",
+        "background.mp3",
+        "music.mp3",
+        "bg_music.wav",
+    ]
+
+    for name in preferred:
+
+        path = MUSIC_DIR / name
+
+        if path.exists():
+            return path
+
+    candidates = [
+        p
+        for p in MUSIC_DIR.rglob("*")
+        if p.is_file()
+        and p.suffix.lower() in AUDIO_EXTENSIONS
+    ]
+
+    if not candidates:
+
+        raise FileNotFoundError(
+            "No music file found in assets/music/"
+        )
+
+    return random.choice(candidates)
+
+
+# ============================================================
+# IMAGE PREPARATION
+# ============================================================
+
+def crop_to_vertical(
+    image: Image.Image,
+) -> Image.Image:
+
+    image = image.convert("RGB")
+
+    source_ratio = (
+        image.width / image.height
     )
+
+    target_ratio = WIDTH / HEIGHT
+
+    if source_ratio > target_ratio:
+
+        # Wider than target
+        new_width = int(
+            image.height * target_ratio
+        )
+
+        left = (
+            image.width - new_width
+        ) // 2
+
+        image = image.crop(
+            (
+                left,
+                0,
+                left + new_width,
+                image.height,
+            )
+        )
+
+    else:
+
+        # Taller than target
+        new_height = int(
+            image.width / target_ratio
+        )
+
+        top = (
+            image.height - new_height
+        ) // 2
+
+        image = image.crop(
+            (
+                0,
+                top,
+                image.width,
+                top + new_height,
+            )
+        )
+
+    return image.resize(
+        (WIDTH, HEIGHT),
+        Image.Resampling.LANCZOS,
+    )
+
+
+# ============================================================
+# BACKGROUND FILTER
+# ============================================================
+
+def apply_background_filter(
+    image: Image.Image,
+) -> Image.Image:
+
+    image = ImageEnhance.Contrast(
+        image
+    ).enhance(1.06)
+
+    image = ImageEnhance.Color(
+        image
+    ).enhance(0.88)
+
+    image = ImageEnhance.Brightness(
+        image
+    ).enhance(0.94)
+
+    # Very subtle blur to make text readable.
+    image = image.filter(
+        ImageFilter.GaussianBlur(0.15)
+    )
+
+    # Subtle vignette
+    overlay = Image.new(
+        "RGBA",
+        image.size,
+        (0, 0, 0, 0),
+    )
+
+    draw = ImageDraw.Draw(
+        overlay,
+        "RGBA",
+    )
+
+    # Edge darkening
+    steps = 18
+
+    for i in range(steps):
+
+        alpha = int(
+            2 + (i / steps) * 8
+        )
+
+        margin = int(
+            i * 18
+        )
+
+        draw.rectangle(
+            (
+                margin,
+                margin,
+                WIDTH - margin,
+                HEIGHT - margin,
+            ),
+            outline=(0, 0, 0, alpha),
+            width=2,
+        )
+
+    return Image.alpha_composite(
+        image.convert("RGBA"),
+        overlay,
+    ).convert("RGB")
+
+
+# ============================================================
+# TEXT CLEANING
+# ============================================================
+
+def clean_shayari_text(text: str) -> str:
+
+    if not text:
+        return ""
+
+    text = str(text)
+
+    # Normalize line endings
+    text = text.replace("\r\n", "\n")
+    text = text.replace("\r", "\n")
+
+    # Remove markdown
+    text = text.replace("**", "")
+    text = text.replace("__", "")
+
+    # Remove common labels accidentally returned by AI
+    unwanted_prefixes = [
+        "shayari:",
+        "shayari -",
+        "poem:",
+        "text:",
+    ]
+
+    stripped = text.strip()
+
+    lower = stripped.lower()
+
+    for prefix in unwanted_prefixes:
+
+        if lower.startswith(prefix):
+
+            stripped = stripped[
+                len(prefix):
+            ].strip()
+
+            break
+
+    # Absolutely no Devanagari.
+    # If Gemini accidentally outputs it,
+    # remove those characters.
+    cleaned_chars = []
+
+    for char in stripped:
+
+        code = ord(char)
+
+        # Devanagari Unicode block
+        if 0x0900 <= code <= 0x097F:
+            continue
+
+        cleaned_chars.append(char)
+
+    stripped = "".join(
+        cleaned_chars
+    )
+
+    # Remove excessive spaces
+    lines = []
+
+    for line in stripped.split("\n"):
+
+        line = " ".join(
+            line.strip().split()
+        )
+
+        if line:
+            lines.append(line)
+        else:
+            # preserve stanza breaks
+            if lines and lines[-1] != "":
+                lines.append("")
+
+    # Avoid too many blank lines
+    result = []
+
+    previous_blank = False
+
+    for line in lines:
+
+        if not line:
+
+            if not previous_blank:
+                result.append("")
+
+            previous_blank = True
+
+        else:
+
+            result.append(line)
+            previous_blank = False
+
+    return "\n".join(result).strip()
+
+
+# ============================================================
+# TEXT WRAPPING
+# ============================================================
+
+def text_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font,
+) -> float:
+
+    bbox = draw.textbbox(
+        (0, 0),
+        text,
+        font=font,
+    )
+
+    return bbox[2] - bbox[0]
+
+
+def wrap_line(
+    draw: ImageDraw.ImageDraw,
+    line: str,
+    font,
+    max_width: int,
+) -> list[str]:
+
+    words = line.split()
+
+    if not words:
+        return [""]
+
+    result = []
+
+    current = words[0]
+
+    for word in words[1:]:
+
+        candidate = (
+            current + " " + word
+        )
+
+        if (
+            text_width(
+                draw,
+                candidate,
+                font,
+            )
+            <= max_width
+        ):
+
+            current = candidate
+
+        else:
+
+            result.append(current)
+            current = word
+
+    result.append(current)
+
+    return result
+
+
+def prepare_text_lines(
+    image: Image.Image,
+    text: str,
+    font,
+    max_width: int,
+) -> list[str]:
+
+    draw = ImageDraw.Draw(image)
+
+    final_lines = []
+
+    for original_line in text.split("\n"):
+
+        if not original_line.strip():
+
+            final_lines.append("")
+            continue
+
+        wrapped = wrap_line(
+            draw,
+            original_line,
+            font,
+            max_width,
+        )
+
+        final_lines.extend(
+            wrapped
+        )
+
+    return final_lines
+
+
+# ============================================================
+# TEXT POSITION
+# ============================================================
+
+def calculate_text_start_y(
+    lines: list[str],
+    font,
+    area_top: int,
+    area_bottom: int,
+    line_gap: int,
+    stanza_gap: int,
+) -> int:
+
+    # Calculate approximate block height.
+    total_height = 0
+
+    for line in lines:
+
+        if line == "":
+
+            total_height += stanza_gap
+
+        else:
+
+            bbox = font.getbbox(line)
+
+            line_height = (
+                bbox[3] - bbox[1]
+            )
+
+            total_height += (
+                line_height + line_gap
+            )
+
+    available_height = (
+        area_bottom - area_top
+    )
+
+    # Center vertically in allowed area
+    y = area_top + (
+        available_height
+        - total_height
+    ) // 2
+
+    # Safety boundaries
+    y = max(
+        area_top,
+        min(
+            y,
+            area_bottom - total_height,
+        ),
+    )
+
+    return y
+
+
+# ============================================================
+# RENDER SHAYARI FRAME
+# ============================================================
+
+def render_shayari_frame(
+    text: str,
+    output_path: Path,
+) -> None:
+
+    # --------------------------------------------------------
+    # Base image
+    # --------------------------------------------------------
+
+    background = find_background()
 
     print(
-        "=" * 60
+        f"Using background: {background}"
     )
 
-    return fallback
+    if (
+        background.suffix.lower()
+        in IMAGE_EXTENSIONS
+    ):
+
+        image = Image.open(
+            background
+        )
+
+        image = crop_to_vertical(
+            image
+        )
+
+        image = apply_background_filter(
+            image
+        )
+
+    else:
+
+        # For video backgrounds, extract
+        # first frame as the text reference.
+        temp_frame = (
+            Path(tempfile.gettempdir())
+            / "shayari_background_frame.jpg"
+        )
+
+        command = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            "0",
+            "-i",
+            str(background),
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920",
+            str(temp_frame),
+        ]
+
+        subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        image = Image.open(
+            temp_frame
+        )
+
+        image = crop_to_vertical(
+            image
+        )
+
+        image = apply_background_filter(
+            image
+        )
+
+    # --------------------------------------------------------
+    # Text
+    # --------------------------------------------------------
+
+    text = clean_shayari_text(
+        text
+    )
+
+    if not text:
+
+        raise ValueError(
+            "Shayari text is empty."
+        )
+
+    # 58px is readable on 1080x1920
+    # and leaves enough room around text.
+    font_size = 58
+
+    font = get_body_font(
+        font_size
+    )
+
+    # Keep text away from extreme edges.
+    max_text_width = 880
+
+    lines = prepare_text_lines(
+        image,
+        text,
+        font,
+        max_text_width,
+    )
+
+    # --------------------------------------------------------
+    # Text layer
+    # --------------------------------------------------------
+
+    text_layer = Image.new(
+        "RGBA",
+        (WIDTH, HEIGHT),
+        (0, 0, 0, 0),
+    )
+
+    draw = ImageDraw.Draw(
+        text_layer
+    )
+
+    # Main poetry area.
+    #
+    # No card.
+    # No rectangle.
+    # No background panel.
+    #
+    # Text is directly over the user's
+    # background.
+    area_top = 360
+    area_bottom = 1580
+
+    line_gap = 22
+    stanza_gap = 58
+
+    y = calculate_text_start_y(
+        lines,
+        font,
+        area_top,
+        area_bottom,
+        line_gap,
+        stanza_gap,
+    )
+
+    # Black text to match the requested
+    # reference-style typography.
+    text_fill = (
+        15,
+        12,
+        10,
+        255,
+    )
+
+    for line in lines:
+
+        if line == "":
+
+            y += stanza_gap
+            continue
+
+        bbox = draw.textbbox(
+            (0, 0),
+            line,
+            font=font,
+        )
+
+        line_width = (
+            bbox[2] - bbox[0]
+        )
+
+        x = (
+            WIDTH - line_width
+        ) // 2
+
+        draw.text(
+            (
+                x,
+                y,
+            ),
+            line,
+            font=font,
+            fill=text_fill,
+        )
+
+        line_height = (
+            bbox[3] - bbox[1]
+        )
+
+        y += (
+            line_height
+            + line_gap
+        )
+
+    # --------------------------------------------------------
+    # Composite
+    # --------------------------------------------------------
+
+    final_image = Image.alpha_composite(
+        image.convert("RGBA"),
+        text_layer,
+    )
+
+    final_image.convert(
+        "RGB"
+    ).save(
+        output_path,
+        "JPEG",
+        quality=95,
+        optimize=True,
+    )
+
+
+# ============================================================
+# FFMPEG HELPERS
+# ============================================================
+
+def run_ffmpeg(
+    command: list[str],
+) -> None:
+
+    print(
+        "Running FFmpeg..."
+    )
+
+    process = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    if process.returncode != 0:
+
+        print(
+            process.stderr[-5000:]
+        )
+
+        raise RuntimeError(
+            "FFmpeg failed."
+        )
+
+
+# ============================================================
+# CREATE IMAGE BACKGROUND VIDEO
+# ============================================================
+
+def create_image_background_video(
+    background_image: Path,
+    output_video: Path,
+    duration: int,
+) -> None:
+
+    command = [
+        "ffmpeg",
+        "-y",
+
+        "-loop",
+        "1",
+
+        "-i",
+        str(background_image),
+
+        "-t",
+        str(duration),
+
+        "-vf",
+        (
+            "scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920,"
+            "format=yuv420p"
+        ),
+
+        "-r",
+        str(FPS),
+
+        "-c:v",
+        "libx264",
+
+        "-preset",
+        "medium",
+
+        "-crf",
+        "20",
+
+        "-pix_fmt",
+        "yuv420p",
+
+        "-an",
+
+        str(output_video),
+    ]
+
+    run_ffmpeg(
+        command
+    )
+
+
+# ============================================================
+# CREATE VIDEO BACKGROUND
+# ============================================================
+
+def create_video_background_video(
+    background_video: Path,
+    output_video: Path,
+    duration: int,
+) -> None:
+
+    command = [
+        "ffmpeg",
+        "-y",
+
+        "-stream_loop",
+        "-1",
+
+        "-i",
+        str(background_video),
+
+        "-t",
+        str(duration),
+
+        "-vf",
+        (
+            "scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920,"
+            "format=yuv420p"
+        ),
+
+        "-r",
+        str(FPS),
+
+        "-an",
+
+        "-c:v",
+        "libx264",
+
+        "-preset",
+        "medium",
+
+        "-crf",
+        "20",
+
+        "-pix_fmt",
+        "yuv420p",
+
+        str(output_video),
+    ]
+
+    run_ffmpeg(
+        command
+    )
+
+
+# ============================================================
+# ADD MUSIC
+# ============================================================
+
+def add_music(
+    silent_video: Path,
+    music: Path,
+    output_video: Path,
+    duration: int,
+) -> None:
+
+    command = [
+        "ffmpeg",
+        "-y",
+
+        "-i",
+        str(silent_video),
+
+        "-stream_loop",
+        "-1",
+
+        "-i",
+        str(music),
+
+        "-t",
+        str(duration),
+
+        "-map",
+        "0:v:0",
+
+        "-map",
+        "1:a:0",
+
+        "-c:v",
+        "copy",
+
+        "-c:a",
+        "aac",
+
+        "-b:a",
+        "192k",
+
+        "-af",
+        "volume=0.65",
+
+        "-shortest",
+
+        "-movflags",
+        "+faststart",
+
+        str(output_video),
+    ]
+
+    run_ffmpeg(
+        command
+    )
+
+
+# ============================================================
+# CREATE VIDEO
+# ============================================================
+
+def create_video(
+    text: str,
+    output_path: str,
+    duration: Optional[int] = None,
+) -> str:
+
+    duration = (
+        duration
+        or DEFAULT_DURATION
+    )
+
+    output = Path(
+        output_path
+    )
+
+    output.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    print("")
+    print("=" * 60)
+    print("SHAYARI VIDEO GENERATOR")
+    print("=" * 60)
+    print("")
+    print(
+        f"Resolution: {WIDTH}x{HEIGHT}"
+    )
+    print(
+        f"Duration: {duration}s"
+    )
+    print(
+        "TTS: DISABLED"
+    )
+    print(
+        "Text animation: DISABLED"
+    )
+    print(
+        "Card overlay: DISABLED"
+    )
+    print(
+        "Logo/handle: DISABLED"
+    )
+    print("")
+
+    with tempfile.TemporaryDirectory() as temp:
+
+        temp_dir = Path(temp)
+
+        text_frame = (
+            temp_dir
+            / "shayari_frame.jpg"
+        )
+
+        silent_video = (
+            temp_dir
+            / "silent_video.mp4"
+        )
+
+        render_shayari_frame(
+            text,
+            text_frame,
+        )
+
+        background = find_background()
+
+        # ----------------------------------------------------
+        # IMPORTANT:
+        #
+        # If background is an image:
+        #   rendered frame becomes full video.
+        #
+        # If background is a video:
+        #   create moving background first,
+        #   then overlay static text frame.
+        # ----------------------------------------------------
+
+        if (
+            background.suffix.lower()
+            in IMAGE_EXTENSIONS
+        ):
+
+            create_image_background_video(
+                text_frame,
+                silent_video,
+                duration,
+            )
+
+        else:
+
+            background_video = (
+                temp_dir
+                / "background_video.mp4"
+            )
+
+            create_video_background_video(
+                background,
+                background_video,
+                duration,
+            )
+
+            # Overlay text frame over moving video.
+            command = [
+                "ffmpeg",
+                "-y",
+
+                "-i",
+                str(background_video),
+
+                "-loop",
+                "1",
+
+                "-i",
+                str(text_frame),
+
+                "-filter_complex",
+                (
+                    "[1:v]format=rgba[text];"
+                    "[0:v][text]overlay=0:0:format=auto,"
+                    "format=yuv420p"
+                ),
+
+                "-t",
+                str(duration),
+
+                "-r",
+                str(FPS),
+
+                "-c:v",
+                "libx264",
+
+                "-preset",
+                "medium",
+
+                "-crf",
+                "20",
+
+                "-pix_fmt",
+                "yuv420p",
+
+                "-an",
+
+                str(silent_video),
+            ]
+
+            run_ffmpeg(
+                command
+            )
+
+        music = find_music()
+
+        print(
+            f"Using music: {music}"
+        )
+
+        add_music(
+            silent_video,
+            music,
+            output,
+            duration,
+        )
+
+    if not output.exists():
+
+        raise RuntimeError(
+            "Final video was not created."
+        )
+
+    print("")
+    print(
+        f"Video created: {output}"
+    )
+
+    return str(output)
+
+
+# ============================================================
+# COMPATIBILITY ALIAS
+# ============================================================
+
+def generate_video(
+    text: str,
+    output_path: str,
+    duration: Optional[int] = None,
+) -> str:
+
+    return create_video(
+        text,
+        output_path,
+        duration,
+    )
 
 
 # ============================================================
@@ -1234,22 +1250,23 @@ def generate_shayari() -> dict:
 
 if __name__ == "__main__":
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format=(
-            "%(asctime)s | "
-            "%(levelname)s | "
-            "%(message)s"
-        ),
+    test_output = (
+        ROOT_DIR
+        / "output"
+        / "test_shayari.mp4"
     )
 
-    result = generate_shayari()
+    create_video(
+        """
+Kabhi kabhi kisi ko paana
+mohabbat nahi hoti...
 
-    print()
-    print(
-        json.dumps(
-            result,
-            ensure_ascii=False,
-            indent=2
-        )
+Uske bina bhi
+use chahte rehna,
+
+shayad isi ko
+sachhi mohabbat kehte hain.
+""",
+        str(test_output),
+        15,
     )
