@@ -1,680 +1,1276 @@
 # ============================================================
-# HINGLISH SHAYARI SHORTS AUTOMATION
+# FILE: main.py
 # ============================================================
 #
-# Schedule:
-#   09:00 IST
-#   14:00 IST
+# HINGLISH / ROMAN HINDI SHAYARI SHORTS AUTOMATION
 #
-# YouTube:
-#   ALWAYS UNLISTED
+# Features:
+#   - Automatic Gemini model switching
+#   - Gemini quota/rate-limit handling
+#   - Roman Hindi / Hinglish validation
+#   - Static Shayari video
+#   - 1080x1920 vertical video
+#   - User background + music
+#   - YouTube UNLISTED upload
+#   - Metadata saving
+#   - Content history
+#   - Pipeline retry
 #
-# Manual:
-#   workflow_dispatch
+# ============================================================
+
+import os
+import sys
+import time
+import json
+import logging
+from pathlib import Path
+from datetime import datetime, timezone
+
+
+# ============================================================
+# IMPORT MODULES
+# ============================================================
+
+# IMPORTANT:
+# Import the whole module instead of importing only the function.
+#
+# This allows us to dynamically change:
+#
+#     shayari_generator.MODEL
+#
+# when switching Gemini models.
+#
+import src.shayari_generator as shayari_generator
+
+from src.shayari_video import create_video
+
+from src.uploader import upload_short_to_youtube
+
+
+# ============================================================
+# DIRECTORIES
+# ============================================================
+
+BASE_DIR = Path(
+    __file__
+).resolve().parent
+
+OUTPUT_DIR = (
+    BASE_DIR / "output"
+)
+
+OUTPUT_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
+VIDEO_DURATION = int(
+    os.getenv(
+        "SHAYARI_DURATION",
+        "15"
+    )
+)
+
+YOUTUBE_UPLOAD = (
+    os.getenv(
+        "YOUTUBE_UPLOAD",
+        "true"
+    ).lower()
+    == "true"
+)
+
+PIPELINE_RETRIES = int(
+    os.getenv(
+        "PIPELINE_RETRIES",
+        "3"
+    )
+)
+
+RETRY_DELAY = int(
+    os.getenv(
+        "RETRY_DELAY",
+        "15"
+    )
+)
+
+
+# ============================================================
+# GEMINI MODELS
+# ============================================================
+#
+# Priority order:
+#
+# 1. gemini-3.6-flash
+# 2. gemini-3.7-flash
+# 3. gemini-3.8-flash
+#
+# You can change these from GitHub Actions using:
+#
+# GEMINI_MODELS
+#
+# Example:
+#
+# GEMINI_MODELS:
+#   "gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash"
 #
 # ============================================================
 
-name: Hinglish Shayari Shorts Automation
+DEFAULT_GEMINI_MODELS = [
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
+]
+
+
+def get_gemini_models():
+
+    value = os.getenv(
+        "GEMINI_MODELS",
+        ""
+    ).strip()
+
+    if not value:
+
+        return (
+            DEFAULT_GEMINI_MODELS.copy()
+        )
+
+    models = []
+
+    for model in value.split(","):
+
+        model = model.strip()
+
+        if (
+            model
+            and model not in models
+        ):
+
+            models.append(
+                model
+            )
+
+    if not models:
+
+        return (
+            DEFAULT_GEMINI_MODELS.copy()
+        )
+
+    return models
+
+
+GEMINI_MODELS = (
+    get_gemini_models()
+)
 
 
 # ============================================================
-# TRIGGERS
+# LOGGING
 # ============================================================
 
-on:
+logging.basicConfig(
+    level=logging.INFO,
+    format=(
+        "%(asctime)s | "
+        "%(levelname)s | "
+        "%(message)s"
+    )
+)
 
-  # ----------------------------------------------------------
-  # Automatic schedule
-  # ----------------------------------------------------------
-
-  schedule:
-
-    # 09:00 AM IST
-    - cron: "0 9 * * *"
-      timezone: "Asia/Kolkata"
-
-    # 02:00 PM IST
-    - cron: "0 14 * * *"
-      timezone: "Asia/Kolkata"
-
-
-  # ----------------------------------------------------------
-  # Manual run
-  # ----------------------------------------------------------
-
-  workflow_dispatch:
+logger = logging.getLogger(
+    "hinglish-shayari"
+)
 
 
 # ============================================================
-# PERMISSIONS
+# TIME
 # ============================================================
 
-permissions:
-  contents: write
+def utc_now():
+
+    return datetime.now(
+        timezone.utc
+    ).isoformat()
 
 
 # ============================================================
-# JOB
+# SAFE FILENAME
 # ============================================================
 
-jobs:
+def safe_filename(text):
 
-  generate-and-upload:
+    allowed = (
+        "abcdefghijklmnopqrstuvwxyz"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789"
+        " -_"
+    )
 
-    name: Generate Shayari Short
+    cleaned = ""
 
-    runs-on: ubuntu-latest
+    for char in str(text):
 
+        if char in allowed:
+
+            cleaned += char
+
+        else:
+
+            cleaned += "_"
+
+    cleaned = "_".join(
+        cleaned.split()
+    )
+
+    if not cleaned:
+
+        cleaned = "shayari_short"
+
+    return cleaned[:80]
+
+
+# ============================================================
+# ROMAN HINDI VALIDATION
+# ============================================================
+
+def validate_roman_hindi(text):
+
+    if not text:
+
+        return False
+
+    for char in str(text):
+
+        code = ord(char)
+
+        # Devanagari
+        if (
+            0x0900
+            <= code
+            <= 0x097F
+        ):
+
+            return False
+
+        # Arabic / Urdu
+        if (
+            0x0600
+            <= code
+            <= 0x06FF
+        ):
+
+            return False
+
+    return True
+
+
+# ============================================================
+# SWITCH GEMINI MODEL
+# ============================================================
+
+def switch_gemini_model(model):
+
+    logger.info(
+        "🔄 Switching Gemini model → %s",
+        model
+    )
+
+    # Environment variable
+    os.environ[
+        "GEMINI_MODEL"
+    ] = model
+
+    # Module-level MODEL variable
+    #
+    # This is important because some versions of
+    # shayari_generator.py use:
+    #
+    # MODEL = os.getenv(...)
+    #
+    # at import time.
+    #
+    # Updating it here guarantees the next call
+    # uses the new model.
+    #
+    try:
+
+        shayari_generator.MODEL = model
+
+    except Exception:
+
+        pass
+
+    logger.info(
+        "🤖 Active Gemini model: %s",
+        model
+    )
+
+
+# ============================================================
+# DETECT QUOTA / RATE LIMIT
+# ============================================================
+
+def is_quota_error(error):
+
+    text = str(
+        error
+    ).lower()
+
+    indicators = [
+
+        "429",
+
+        "resource_exhausted",
+
+        "quota",
+
+        "rate limit",
+
+        "rate_limit",
+
+        "too many requests",
+
+        "generate_requests_per_day",
+
+        "limit: 20",
+
+    ]
+
+    return any(
+        item in text
+        for item in indicators
+    )
+
+
+# ============================================================
+# GENERATE SHAYARI WITH MODEL SWITCHING
+# ============================================================
+
+def generate_content():
+
+    last_error = None
+
+    total_models = len(
+        GEMINI_MODELS
+    )
+
+    for index, model in enumerate(
+        GEMINI_MODELS
+    ):
+
+        logger.info(
+            ""
+        )
+
+        logger.info(
+            "🤖 Gemini attempt "
+            "%d/%d",
+            index + 1,
+            total_models
+        )
+
+        logger.info(
+            "Model: %s",
+            model
+        )
+
+        switch_gemini_model(
+            model
+        )
+
+        try:
+
+            content = (
+                shayari_generator
+                .generate_shayari()
+            )
+
+            if not content:
+
+                raise RuntimeError(
+                    "Gemini returned empty content."
+                )
+
+            if not isinstance(
+                content,
+                dict
+            ):
+
+                raise RuntimeError(
+                    "Gemini response is not a dictionary."
+                )
+
+            shayari = str(
+                content.get(
+                    "shayari",
+                    ""
+                )
+            ).strip()
+
+            if not shayari:
+
+                raise RuntimeError(
+                    "Generated Shayari is empty."
+                )
+
+            # --------------------------------------------
+            # Roman Hindi check
+            # --------------------------------------------
+
+            if not validate_roman_hindi(
+                shayari
+            ):
+
+                raise RuntimeError(
+                    "Generated Shayari contains "
+                    "Devanagari or Urdu characters."
+                )
+
+            # --------------------------------------------
+            # Store model name
+            # --------------------------------------------
+
+            content[
+                "_gemini_model"
+            ] = model
+
+            logger.info(
+                "✅ Shayari generated successfully."
+            )
+
+            logger.info(
+                "🤖 Model used: %s",
+                model
+            )
+
+            return content
+
+        except Exception as error:
+
+            last_error = error
+
+            logger.warning(
+                "❌ Gemini model failed: %s",
+                error
+            )
+
+            # --------------------------------------------
+            # QUOTA ERROR
+            # --------------------------------------------
+
+            if is_quota_error(
+                error
+            ):
+
+                logger.warning(
+                    "🚫 Gemini quota/rate-limit detected."
+                )
+
+                if (
+                    index + 1
+                    < total_models
+                ):
+
+                    next_model = (
+                        GEMINI_MODELS[
+                            index + 1
+                        ]
+                    )
+
+                    logger.info(
+                        "➡️ Automatically switching:"
+                    )
+
+                    logger.info(
+                        "%s → %s",
+                        model,
+                        next_model
+                    )
+
+                    # DO NOT wait 15/30/60 seconds
+                    # for daily quota.
+                    #
+                    # Immediately switch model.
+
+                    continue
+
+                logger.warning(
+                    "⚠️ All Gemini models exhausted."
+                )
+
+                break
+
+            # --------------------------------------------
+            # NORMAL MODEL ERROR
+            # --------------------------------------------
+
+            if (
+                index + 1
+                < total_models
+            ):
+
+                next_model = (
+                    GEMINI_MODELS[
+                        index + 1
+                    ]
+                )
+
+                logger.info(
+                    "➡️ Switching model:"
+                )
+
+                logger.info(
+                    "%s → %s",
+                    model,
+                    next_model
+                )
+
+                time.sleep(2)
+
+                continue
+
+    # ========================================================
+    # ALL GEMINI MODELS FAILED
+    # ========================================================
+
+    logger.warning(
+        ""
+    )
+
+    logger.warning(
+        "⚠️ All Gemini models failed."
+    )
+
+    if last_error:
+
+        logger.warning(
+            "Last error: %s",
+            last_error
+        )
 
     # --------------------------------------------------------
-    # Prevent one failed/stuck run from running forever
+    # LOCAL FALLBACK
+    # --------------------------------------------------------
+    #
+    # IMPORTANT:
+    # generate_shayari() already contains the local
+    # fallback pool.
+    #
+    # We call it one final time.
+    #
     # --------------------------------------------------------
 
-    timeout-minutes: 30
+    logger.info(
+        "🛟 Using local Shayari fallback..."
+    )
+
+    try:
+
+        fallback_model = (
+            GEMINI_MODELS[-1]
+        )
+
+        switch_gemini_model(
+            fallback_model
+        )
+
+        fallback = (
+            shayari_generator
+            .generate_shayari()
+        )
+
+        if fallback:
+
+            fallback[
+                "_gemini_model"
+            ] = "LOCAL_FALLBACK"
+
+            logger.info(
+                "✅ Local fallback Shayari ready."
+            )
+
+            return fallback
+
+    except Exception as error:
+
+        logger.error(
+            "❌ Local fallback failed: %s",
+            error
+        )
+
+    raise RuntimeError(
+        "Gemini models and local fallback failed."
+    )
+
+
+# ============================================================
+# CREATE VIDEO
+# ============================================================
+
+def generate_video_file(
+    content,
+    attempt
+):
+
+    title = content.get(
+        "title",
+        "Dard Bhari Shayari"
+    )
 
+    filename = (
+        f"{safe_filename(title)}"
+        f"_{int(time.time())}"
+        f"_{attempt}.mp4"
+    )
+
+    output_path = (
+        OUTPUT_DIR / filename
+    )
 
-    steps:
+    logger.info(
+        ""
+    )
 
+    logger.info(
+        "🎬 Creating Shayari video..."
+    )
 
-      # ======================================================
-      # 1. CHECKOUT REPOSITORY
-      # ======================================================
+    logger.info(
+        "📐 Resolution: 1080x1920"
+    )
+
+    logger.info(
+        "⏱️ Duration: %s seconds",
+        VIDEO_DURATION
+    )
+
+    # IMPORTANT:
+    #
+    # Positional arguments are used intentionally.
+    #
+    # This fixes:
+    #
+    # create_video() got an unexpected
+    # keyword argument 'shayari'
+    #
+    result = create_video(
+        content["shayari"],
+        str(output_path),
+        VIDEO_DURATION,
+    )
+
+    # --------------------------------------------------------
+    # Handle functions that return output path
+    # --------------------------------------------------------
+
+    if result:
 
-      - name: Checkout repository
+        result_path = Path(
+            str(result)
+        )
 
-        uses: actions/checkout@v7
+        if result_path.exists():
 
-        with:
-          fetch-depth: 0
+            output_path = (
+                result_path
+            )
 
+    # --------------------------------------------------------
+    # Verify output
+    # --------------------------------------------------------
+
+    if not output_path.exists():
 
-      # ======================================================
-      # 2. SETUP PYTHON
-      # ======================================================
+        raise RuntimeError(
+            "Video generation finished but "
+            "MP4 file was not found."
+        )
+
+    file_size = (
+        output_path.stat().st_size
+        / (1024 * 1024)
+    )
+
+    if file_size < 0.1:
+
+        raise RuntimeError(
+            "Generated MP4 is suspiciously small."
+        )
 
-      # Python 3.11 is intentionally used because the project
-      # contains older MoviePy/Pillow versions that are safer
-      # on Python 3.11 than 3.13+.
+    logger.info(
+        "✅ Video created successfully."
+    )
 
-      - name: Setup Python 3.11
+    logger.info(
+        "🎥 %s",
+        output_path
+    )
 
-        uses: actions/setup-python@v7
+    logger.info(
+        "📦 Size: %.2f MB",
+        file_size
+    )
 
-        with:
-          python-version: "3.11"
-          cache: "pip"
+    return output_path
 
 
-      # ======================================================
-      # 3. INSTALL SYSTEM DEPENDENCIES
-      # ======================================================
+# ============================================================
+# SAVE METADATA
+# ============================================================
 
-      - name: Install FFmpeg and fonts
+def save_metadata(
+    content,
+    video_path
+):
 
-        run: |
+    metadata = {
 
-          sudo apt-get update
+        "created_at":
+            utc_now(),
 
-          sudo apt-get install -y \
-            ffmpeg \
-            fontconfig \
-            fonts-dejavu \
-            fonts-liberation
+        "title":
+            content.get(
+                "title",
+                ""
+            ),
 
+        "description":
+            content.get(
+                "description",
+                ""
+            ),
 
-      # ======================================================
-      # 4. VERIFY FFmpeg
-      # ======================================================
+        "hashtags":
+            content.get(
+                "hashtags",
+                []
+            ),
 
-      - name: Verify FFmpeg
+        "tags":
+            content.get(
+                "tags",
+                []
+            ),
 
-        run: |
+        "shayari":
+            content.get(
+                "shayari",
+                ""
+            ),
 
-          ffmpeg -version
+        "gemini_model":
+            content.get(
+                "_gemini_model",
+                "unknown"
+            ),
 
-          ffprobe -version
+        "video":
+            str(video_path),
 
+    }
 
-      # ======================================================
-      # 5. VERIFY PROJECT FILES
-      # ======================================================
+    metadata_path = (
+        Path(video_path)
+        .with_suffix(".json")
+    )
+
+    with open(
+        metadata_path,
+        "w",
+        encoding="utf-8"
+    ) as file:
 
-      - name: Verify project structure
+        json.dump(
+            metadata,
+            file,
+            ensure_ascii=False,
+            indent=2
+        )
+
+    logger.info(
+        "📝 Metadata saved: %s",
+        metadata_path
+    )
+
+    return metadata_path
+
 
-        run: |
+# ============================================================
+# SAVE CONTENT HISTORY
+# ============================================================
 
-          echo "Checking project..."
+def update_history(
+    content
+):
 
-          test -f main.py
-          test -f requirements.txt
+    try:
 
-          test -f src/shayari_generator.py
-          test -f src/shayari_video.py
-          test -f src/uploader.py
+        shayari_generator.save_history(
+            content
+        )
 
-          test -d assets
-          test -d assets/music
+        logger.info(
+            "📚 Content history updated."
+        )
 
-          echo "Project structure OK."
+    except Exception as error:
 
+        logger.warning(
+            "⚠️ Could not update history: %s",
+            error
+        )
 
-      # ======================================================
-      # 6. INSTALL PYTHON DEPENDENCIES
-      # ======================================================
 
-      - name: Install Python dependencies
+# ============================================================
+# YOUTUBE UPLOAD
+# ============================================================
 
-        run: |
+def upload_video(
+    content,
+    video_path
+):
+
+    if not YOUTUBE_UPLOAD:
 
-          python -m pip install --upgrade pip setuptools wheel
+        logger.info(
+            "⏭️ YouTube upload disabled."
+        )
 
-          pip install -r requirements.txt
+        return None
 
+    title = content.get(
+        "title",
+        "Dard Bhari Shayari 💔"
+    )
 
-      # ======================================================
-      # 7. CREATE OUTPUT DIRECTORY
-      # ======================================================
+    description = content.get(
+        "description",
+        ""
+    )
 
-      - name: Prepare output directory
+    tags = content.get(
+        "tags",
+        []
+    )
 
-        run: |
+    logger.info(
+        ""
+    )
 
-          mkdir -p output
+    logger.info(
+        "📤 Uploading to YouTube..."
+    )
 
-          echo "Output directory ready."
+    logger.info(
+        "🔒 Privacy: UNLISTED"
+    )
 
+    result = upload_short_to_youtube(
+        video_path=str(
+            video_path
+        ),
+        title=title,
+        description=description,
+        tags=tags,
+        thumbnail_path=None,
+    )
 
-      # ======================================================
-      # 8. RESTORE GOOGLE OAUTH CLIENT SECRET
-      # ======================================================
-      #
-      # GitHub Secret required:
-      #
-      # CLIENT_SECRET_B64
-      #
-      # This should contain base64 encoded client_secrets.json
-      #
-      # DO NOT commit client_secrets.json to GitHub.
-      #
-      # ======================================================
+    if not result:
 
-      - name: Restore YouTube client secret
+        raise RuntimeError(
+            "YouTube uploader returned no result."
+        )
 
-        env:
-          CLIENT_SECRET_B64: ${{ secrets.CLIENT_SECRET_B64 }}
+    privacy = str(
+        result.get(
+            "privacy_status",
+            ""
+        )
+    ).lower()
 
-        run: |
+    # --------------------------------------------------------
+    # SAFETY CHECK
+    # --------------------------------------------------------
 
-          if [ -z "$CLIENT_SECRET_B64" ]; then
-            echo "ERROR: CLIENT_SECRET_B64 secret is missing."
-            exit 1
-          fi
+    if privacy:
 
-          printf '%s' "$CLIENT_SECRET_B64" \
-            | base64 --decode \
-            > client_secrets.json
+        if privacy != "unlisted":
 
-          test -s client_secrets.json
+            raise RuntimeError(
+                "SAFETY CHECK FAILED: "
+                f"YouTube returned privacy "
+                f"'{privacy}' instead of 'unlisted'."
+            )
 
-          echo "YouTube client secret restored."
+    logger.info(
+        "✅ YouTube upload successful."
+    )
+
+    logger.info(
+        "🔒 Video is UNLISTED."
+    )
 
+    if result.get(
+        "video_id"
+    ):
 
-      # ======================================================
-      # 9. RESTORE GOOGLE OAUTH CREDENTIALS
-      # ======================================================
-      #
-      # GitHub Secret required:
-      #
-      # CREDENTIALS_B64
-      #
-      # This should contain the authorized credentials.json
-      # generated after YouTube OAuth.
-      #
-      # ======================================================
+        logger.info(
+            "🆔 Video ID: %s",
+            result["video_id"]
+        )
 
-      - name: Restore YouTube OAuth credentials
+    if result.get(
+        "shorts_url"
+    ):
 
-        env:
-          CREDENTIALS_B64: ${{ secrets.CREDENTIALS_B64 }}
+        logger.info(
+            "🔗 Shorts URL: %s",
+            result["shorts_url"]
+        )
 
-        run: |
+    return result
 
-          if [ -z "$CREDENTIALS_B64" ]; then
-            echo "ERROR: CREDENTIALS_B64 secret is missing."
-            exit 1
-          fi
 
-          printf '%s' "$CREDENTIALS_B64" \
-            | base64 --decode \
-            > credentials.json
+# ============================================================
+# PIPELINE
+# ============================================================
 
-          test -s credentials.json
+def run_pipeline():
 
-          echo "YouTube OAuth credentials restored."
+    logger.info(
+        ""
+    )
+
+    logger.info(
+        "=" * 60
+    )
+
+    logger.info(
+        "🚀 HINGLISH SHAYARI AUTOMATION"
+    )
+
+    logger.info(
+        "=" * 60
+    )
+
+    logger.info(
+        "🤖 Gemini model priority:"
+    )
+
+    for number, model in enumerate(
+        GEMINI_MODELS,
+        start=1
+    ):
+
+        logger.info(
+            "   %d. %s",
+            number,
+            model
+        )
+
+    logger.info(
+        ""
+    )
+
+    logger.info(
+        "🎥 Video: 1080x1920"
+    )
+
+    logger.info(
+        "⏱️ Duration: %s seconds",
+        VIDEO_DURATION
+    )
+
+    logger.info(
+        "🔒 YouTube: UNLISTED"
+    )
+
+    last_error = None
+
+    # ========================================================
+    # PIPELINE RETRIES
+    # ========================================================
+
+    for attempt in range(
+        1,
+        PIPELINE_RETRIES + 1
+    ):
+
+        logger.info(
+            ""
+        )
+
+        logger.info(
+            "🔁 Pipeline attempt %d/%d",
+            attempt,
+            PIPELINE_RETRIES
+        )
+
+        try:
+
+            # ------------------------------------------------
+            # STEP 1
+            # ------------------------------------------------
+
+            content = (
+                generate_content()
+            )
+
+            logger.info(
+                ""
+            )
+
+            logger.info(
+                "✍️ Generated Shayari:"
+            )
+
+            logger.info(
+                "%s",
+                content["shayari"]
+            )
+
+            logger.info(
+                ""
+            )
+
+            logger.info(
+                "🏷️ Title: %s",
+                content.get(
+                    "title",
+                    ""
+                )
+            )
+
+            logger.info(
+                "🤖 Generator: %s",
+                content.get(
+                    "_gemini_model",
+                    "unknown"
+                )
+            )
+
+            # ------------------------------------------------
+            # STEP 2
+            # ------------------------------------------------
+
+            if not validate_roman_hindi(
+                content["shayari"]
+            ):
+
+                raise RuntimeError(
+                    "Shayari contains Devanagari/Urdu."
+                )
+
+            # ------------------------------------------------
+            # STEP 3
+            # ------------------------------------------------
+
+            video_path = (
+                generate_video_file(
+                    content,
+                    attempt
+                )
+            )
+
+            # ------------------------------------------------
+            # STEP 4
+            # ------------------------------------------------
+
+            metadata_path = (
+                save_metadata(
+                    content,
+                    video_path
+                )
+            )
+
+            # ------------------------------------------------
+            # STEP 5
+            # ------------------------------------------------
+
+            update_history(
+                content
+            )
+
+            # ------------------------------------------------
+            # STEP 6
+            # ------------------------------------------------
+
+            upload_result = (
+                upload_video(
+                    content,
+                    video_path
+                )
+            )
+
+            # =================================================
+            # SUCCESS
+            # =================================================
+
+            logger.info(
+                ""
+            )
+
+            logger.info(
+                "=" * 60
+            )
+
+            logger.info(
+                "🎉 AUTOMATION COMPLETED"
+            )
+
+            logger.info(
+                "=" * 60
+            )
+
+            logger.info(
+                "🎬 Video: %s",
+                video_path
+            )
+
+            logger.info(
+                "📝 Metadata: %s",
+                metadata_path
+            )
+
+            if upload_result:
+
+                logger.info(
+                    "📺 YouTube: %s",
+                    upload_result.get(
+                        "shorts_url",
+                        upload_result.get(
+                            "url",
+                            "uploaded"
+                        )
+                    )
+                )
 
+            logger.info(
+                "=" * 60
+            )
 
-      # ======================================================
-      # 10. VALIDATE GOOGLE FILES
-      # ======================================================
+            return {
+                "success": True,
 
-      - name: Validate Google credentials files
+                "video_path":
+                    str(video_path),
 
-        run: |
+                "metadata_path":
+                    str(metadata_path),
 
-          python - <<'PY'
-          import json
-          from pathlib import Path
+                "upload":
+                    upload_result,
+            }
 
-          for filename in [
-              "client_secrets.json",
-              "credentials.json",
-          ]:
+        except Exception as error:
 
-              path = Path(filename)
+            last_error = error
 
-              if not path.exists():
-                  raise SystemExit(
-                      f"Missing {filename}"
-                  )
+            logger.exception(
+                "❌ Pipeline attempt %d failed.",
+                attempt
+            )
 
-              try:
-                  data = json.loads(
-                      path.read_text(
-                          encoding="utf-8"
-                      )
-                  )
-              except Exception as exc:
-                  raise SystemExit(
-                      f"Invalid JSON in {filename}: {exc}"
-                  )
+            if (
+                attempt
+                >= PIPELINE_RETRIES
+            ):
 
-              if not isinstance(data, dict):
-                  raise SystemExit(
-                      f"{filename} is not a JSON object."
-                  )
+                break
 
-              print(
-                  f"{filename}: valid JSON"
-              )
-          PY
+            logger.info(
+                "⏳ Waiting %s seconds...",
+                RETRY_DELAY
+            )
 
+            time.sleep(
+                RETRY_DELAY
+            )
 
-      # ======================================================
-      # 11. CHECK BACKGROUND ASSETS
-      # ======================================================
+    # ========================================================
+    # FAILURE
+    # ========================================================
 
-      - name: Check background assets
+    logger.error(
+        ""
+    )
 
-        run: |
+    logger.error(
+        "=" * 60
+    )
 
-          echo "Available assets:"
+    logger.error(
+        "💥 AUTOMATION FAILED"
+    )
 
-          find assets \
-            -maxdepth 2 \
-            -type f \
-            -print
+    logger.error(
+        "=" * 60
+    )
 
+    if last_error:
 
-      # ======================================================
-      # 12. CHECK MUSIC
-      # ======================================================
+        logger.error(
+            "Last error: %s",
+            last_error
+        )
 
-      - name: Check music assets
+    return {
+        "success": False,
 
-        run: |
+        "error":
+            str(last_error)
+            if last_error
+            else "Unknown error",
+    }
 
-          MUSIC_COUNT=$(find assets/music \
-            -type f \
-            \( \
-              -iname "*.mp3" \
-              -o -iname "*.wav" \
-              -o -iname "*.m4a" \
-              -o -iname "*.aac" \
-            \) | wc -l)
 
-          echo "Music files found: $MUSIC_COUNT"
+# ============================================================
+# MAIN
+# ============================================================
 
-          if [ "$MUSIC_COUNT" -eq 0 ]; then
-            echo "ERROR: No music found in assets/music/"
-            exit 1
-          fi
+def main():
 
+    try:
 
-      # ======================================================
-      # 13. CHECK BACKGROUND IMAGE / VIDEO
-      # ======================================================
+        result = run_pipeline()
 
-      - name: Check visual background assets
+        if result.get(
+            "success"
+        ):
 
-        run: |
+            return 0
 
-          BACKGROUND_COUNT=$(find assets \
-            -maxdepth 1 \
-            -type f \
-            \( \
-              -iname "*.jpg" \
-              -o -iname "*.jpeg" \
-              -o -iname "*.png" \
-              -o -iname "*.webp" \
-              -o -iname "*.mp4" \
-              -o -iname "*.mov" \
-              -o -iname "*.webm" \
-            \) | wc -l)
+        return 1
 
-          echo "Background files found: $BACKGROUND_COUNT"
+    except KeyboardInterrupt:
 
-          if [ "$BACKGROUND_COUNT" -eq 0 ]; then
-            echo "ERROR: No background image/video found."
-            exit 1
-          fi
+        logger.warning(
+            "🛑 Automation interrupted."
+        )
 
+        return 130
 
-      # ======================================================
-      # 14. SHOW CONFIGURATION
-      # ======================================================
+    except Exception as error:
 
-      - name: Show automation configuration
+        logger.exception(
+            "💥 Fatal error: %s",
+            error
+        )
 
-        run: |
+        return 1
 
-          echo "=============================================="
-          echo "HINGLISH SHAYARI AUTOMATION"
-          echo "=============================================="
 
-          echo "Python:"
-          python --version
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
-          echo ""
+if __name__ == "__main__":
 
-          echo "FFmpeg:"
-          ffmpeg -version | head -n 1
-
-          echo ""
-
-          echo "YouTube upload:"
-          echo "ENABLED"
-
-          echo ""
-
-          echo "YouTube privacy:"
-          echo "UNLISTED"
-
-          echo ""
-
-          echo "Video:"
-          echo "1080x1920"
-          echo "9:16"
-          echo "Static Shayari"
-          echo "No TTS"
-
-          echo "=============================================="
-
-
-      # ======================================================
-      # 15. RUN AUTOMATION
-      # ======================================================
-
-      - name: Generate and upload Shayari Short
-
-        env:
-
-          # --------------------------------------------------
-          # Gemini
-          # --------------------------------------------------
-
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-
-          # --------------------------------------------------
-          # Generator
-          # --------------------------------------------------
-
-          GEMINI_MODEL: "gemini-3.6-flash"
-
-          # --------------------------------------------------
-          # Video
-          # --------------------------------------------------
-
-          SHAYARI_DURATION: "15"
-
-          # --------------------------------------------------
-          # YouTube
-          # --------------------------------------------------
-
-          YOUTUBE_UPLOAD: "true"
-
-          YOUTUBE_CATEGORY_ID: "22"
-
-          # --------------------------------------------------
-          # Retry
-          # --------------------------------------------------
-
-          PIPELINE_RETRIES: "3"
-
-          RETRY_DELAY: "15"
-
-        run: |
-
-          if [ -z "$GOOGLE_API_KEY" ]; then
-            echo "ERROR: GOOGLE_API_KEY secret is missing."
-            exit 1
-          fi
-
-          python main.py
-
-
-      # ======================================================
-      # 16. VERIFY OUTPUT
-      # ======================================================
-
-      - name: Verify generated video
-
-        run: |
-
-          echo "Generated files:"
-
-          find output \
-            -maxdepth 1 \
-            -type f \
-            -print
-
-
-          VIDEO_COUNT=$(find output \
-            -maxdepth 1 \
-            -type f \
-            -iname "*.mp4" \
-            | wc -l)
-
-
-          if [ "$VIDEO_COUNT" -eq 0 ]; then
-
-            echo "ERROR:"
-            echo "No MP4 video was generated."
-
-            exit 1
-
-          fi
-
-
-          echo ""
-          echo "Video count: $VIDEO_COUNT"
-
-
-      # ======================================================
-      # 17. VERIFY VIDEO FORMAT
-      # ======================================================
-
-      - name: Verify video dimensions
-
-        shell: bash
-
-        run: |
-
-          VIDEO_FILE=$(find output \
-            -maxdepth 1 \
-            -type f \
-            -iname "*.mp4" \
-            | head -n 1)
-
-
-          echo "Checking:"
-          echo "$VIDEO_FILE"
-
-
-          WIDTH=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=width \
-            -of csv=p=0 \
-            "$VIDEO_FILE")
-
-
-          HEIGHT=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=height \
-            -of csv=p=0 \
-            "$VIDEO_FILE")
-
-
-          echo "Width: $WIDTH"
-          echo "Height: $HEIGHT"
-
-
-          if [ "$WIDTH" != "1080" ]; then
-
-            echo "ERROR: Width is not 1080."
-
-            exit 1
-
-          fi
-
-
-          if [ "$HEIGHT" != "1920" ]; then
-
-            echo "ERROR: Height is not 1920."
-
-            exit 1
-
-          fi
-
-
-          echo "1080x1920 verification passed."
-
-
-      # ======================================================
-      # 18. UPLOAD GENERATED VIDEO AS ARTIFACT
-      # ======================================================
-      #
-      # Useful for downloading/viewing the generated result
-      # from GitHub Actions.
-      #
-      # Credentials are NOT included.
-      #
-      # ======================================================
-
-      - name: Upload generated output
-
-        if: always()
-
-        uses: actions/upload-artifact@v7
-
-        with:
-
-          name: shayari-short-${{ github.run_number }}
-
-          path: |
-            output/*.mp4
-            output/*.json
-
-          if-no-files-found: warn
-
-          retention-days: 7
-
-
-      # ======================================================
-      # 19. UPDATE CONTENT HISTORY
-      # ======================================================
-
-      - name: Update content history
-
-        if: success()
-
-        run: |
-
-          if [ ! -f content_history.json ]; then
-
-            echo "content_history.json not found."
-
-            exit 0
-
-          fi
-
-
-          git config user.name \
-            "github-actions[bot]"
-
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
-
-          git add content_history.json
-
-
-          if git diff --cached --quiet; then
-
-            echo "No history changes to commit."
-
-          else
-
-            git commit \
-              -m "chore: update shayari content history"
-
-            git push
-
-          fi
-
-
-      # ======================================================
-      # 20. CLEAN SENSITIVE FILES
-      # ======================================================
-      #
-      # Even though GitHub destroys the runner after the job,
-      # explicitly remove credentials.
-      #
-      # ======================================================
-
-      - name: Remove OAuth credentials
-
-        if: always()
-
-        run: |
-
-          rm -f client_secrets.json
-          rm -f credentials.json
-
-          echo "Sensitive OAuth files removed."
-
-
-      # ======================================================
-      # 21. FINAL STATUS
-      # ======================================================
-
-      - name: Final status
-
-        if: success()
-
-        run: |
-
-          echo ""
-          echo "================================================"
-          echo "SHAYARI AUTOMATION COMPLETED"
-          echo "================================================"
-          echo ""
-          echo "YouTube upload: SUCCESS"
-          echo "Privacy: UNLISTED"
-          echo "Video: 1080x1920"
-          echo ""
-          echo "You can manually make the video PUBLIC"
-          echo "from YouTube Studio."
-          echo ""
-          echo "================================================"
+    sys.exit(
+        main()
+    )
