@@ -1,28 +1,34 @@
 # ============================================================
 # FILE: src/shayari_generator.py
-# HINGLISH / ROMAN HINDI SHAYARI GENERATOR
 # ============================================================
 #
-# Generates:
-#   ✅ Original Roman/Hinglish Shayari
-#   ✅ YouTube title
-#   ✅ Description
-#   ✅ Hashtags
-#   ✅ SEO tags
-#   ✅ Category
+# HINGLISH / ROMAN HINDI SHAYARI GENERATOR
 #
-# Does NOT generate:
-#   ❌ Devanagari Hindi
-#   ❌ Voice script
-#   ❌ TTS
-#   ❌ Famous/copied Shayari
+# Features:
+#   - Gemini generated original Shayari
+#   - Roman Hindi / Hinglish only
+#   - No Devanagari
+#   - Literary-quality prompting
+#   - Strong emotional hooks
+#   - Natural poetry line breaks
+#   - Poetry block spacing
+#   - SEO title
+#   - SEO description
+#   - SEO hashtags
+#   - YouTube tags
+#   - Duplicate prevention
+#   - Content history
+#   - Fallback Shayari
+#
 # ============================================================
 
-import json
 import os
-import random
 import re
+import json
+import random
+import hashlib
 from pathlib import Path
+from typing import Dict, List, Any
 
 from google import genai
 from google.genai import types
@@ -32,9 +38,11 @@ from google.genai import types
 # CONFIG
 # ============================================================
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-HISTORY_FILE = ROOT_DIR / "content_history.json"
+HISTORY_FILE = BASE_DIR / "content_history.json"
+
+API_KEY = os.getenv("GOOGLE_API_KEY")
 
 MODEL = os.getenv(
     "GEMINI_MODEL",
@@ -45,164 +53,578 @@ MAX_HISTORY = 200
 
 
 # ============================================================
-# SHAYARI CATEGORIES
+# CONTENT CATEGORIES
 # ============================================================
 
 CATEGORIES = [
     "sad love",
     "heartbreak",
     "one sided love",
-    "deep feelings",
-    "zindagi",
-    "dosti",
-    "attitude",
-    "khamoshi",
+    "bewafa",
+    "judai",
     "yaadein",
-    "alone",
+    "khamoshi",
+    "mohabbat",
+    "intezaar",
+    "dard",
+    "tanhai",
+    "zindagi",
+    "attitude",
+    "deep feelings",
     "missing someone",
     "unspoken love",
 ]
 
 
 # ============================================================
-# DEVANAGARI DETECTOR
+# LITERARY REFERENCES
+# ============================================================
+#
+# These are style/reference directions.
+#
+# We do NOT ask the model to reproduce copyrighted poems.
+# Instead we ask for original writing with qualities such as:
+#
+#   - classical imagery
+#   - emotional depth
+#   - conversational pain
+#   - philosophical undertone
+#   - metaphor
+#
 # ============================================================
 
-DEVANAGARI_PATTERN = re.compile(
-    r"[\u0900-\u097F]"
-)
+LITERARY_DIRECTIONS = {
+    "ghazal_classical": [
+        "classical Urdu ghazal atmosphere",
+        "subtle metaphors",
+        "ishq, hijr, intezaar and firaaq",
+        "elegant and restrained language",
+        "philosophical emotional depth",
+    ],
 
+    "modern_sad": [
+        "modern melancholic poetry",
+        "quiet emotional pain",
+        "simple but memorable imagery",
+        "loneliness and emotional distance",
+        "short powerful statements",
+    ],
+
+    "life_philosophy": [
+        "philosophical observation about life",
+        "human contradictions",
+        "simple words with deeper meaning",
+        "realistic emotional insight",
+        "thought-provoking ending",
+    ],
+
+    "romantic": [
+        "soft romantic imagery",
+        "intimate emotions",
+        "subtle longing",
+        "memory and presence",
+        "emotion without excessive sweetness",
+    ],
+
+    "deep_heartbreak": [
+        "quiet heartbreak",
+        "unsaid feelings",
+        "emotional distance",
+        "loss without melodrama",
+        "a strong final line",
+    ],
+}
+
+
+# ============================================================
+# FALLBACK SHAYARI
+# ============================================================
+
+FALLBACK_SHAYARI = [
+    {
+        "category": "heartbreak",
+        "style": "deep_heartbreak",
+        "lines": [
+            "Tumse bichhad kar bhi",
+            "tumse hi milta raha main,",
+            "",
+            "log kehte rahe waqt badal deta hai sabko,",
+            "shayad unhone kisi ko",
+            "dil se chaha hi nahi."
+        ],
+    },
+    {
+        "category": "one sided love",
+        "style": "romantic",
+        "lines": [
+            "Uske paas rehne ki",
+            "khwahish bhi ajeeb thi,",
+            "",
+            "woh mera kabhi tha hi nahi,",
+            "phir bhi uske khone ka",
+            "dard bahut tha."
+        ],
+    },
+    {
+        "category": "khamoshi",
+        "style": "deep_heartbreak",
+        "lines": [
+            "Kuch baatein lafzon se",
+            "kahan kahi jaati hain,",
+            "",
+            "aankhon mein ruk jaati hain,",
+            "aur umr bhar",
+            "khamosh rehti hain."
+        ],
+    },
+    {
+        "category": "yaadein",
+        "style": "modern_sad",
+        "lines": [
+            "Yaadein bhi ajeeb hoti hain,",
+            "jab chahein tab nahi aati,",
+            "",
+            "aur jab aa jaati hain,",
+            "phir kisi aur cheez ko",
+            "rehne nahi deti."
+        ],
+    },
+    {
+        "category": "zindagi",
+        "style": "life_philosophy",
+        "lines": [
+            "Zindagi ne ek baat",
+            "bahut der se samjhayi,",
+            "",
+            "jo waqt ke saath badal jaaye,",
+            "use apna kehna",
+            "zaroori nahi hota."
+        ],
+    },
+]
+
+
+# ============================================================
+# BASIC HELPERS
+# ============================================================
 
 def contains_devanagari(text: str) -> bool:
-    """Return True if text contains Devanagari characters."""
+    """
+    Detect Hindi/Devanagari Unicode characters.
+    """
+
+    if not text:
+        return False
 
     return bool(
-        DEVANAGARI_PATTERN.search(
-            text or ""
-        )
+        re.search(r"[\u0900-\u097F]", text)
     )
 
 
+def clean_text(text: str) -> str:
+    """
+    Basic cleanup.
+    """
+
+    if not text:
+        return ""
+
+    text = str(text)
+
+    # Remove markdown
+    text = re.sub(r"\*\*", "", text)
+    text = re.sub(r"\*", "", text)
+    text = re.sub(r"`", "", text)
+
+    # Normalize excessive spaces
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # Normalize excessive blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return text.strip()
+
+
+def normalize_lines(lines: List[str]) -> List[str]:
+    """
+    Clean generated poetry lines while preserving
+    intentional blank lines.
+    """
+
+    result = []
+
+    for line in lines:
+
+        if line is None:
+            continue
+
+        line = str(line).strip()
+
+        if not line:
+            result.append("")
+            continue
+
+        # Remove accidental bullets
+        line = re.sub(
+            r"^[\-\*\•\·]+\s*",
+            "",
+            line
+        )
+
+        result.append(line)
+
+    # Remove leading/trailing blank lines
+    while result and not result[0]:
+        result.pop(0)
+
+    while result and not result[-1]:
+        result.pop()
+
+    return result
+
+
+def make_fingerprint(lines: List[str]) -> str:
+    """
+    Create duplicate fingerprint.
+    """
+
+    text = " ".join(
+        line.strip().lower()
+        for line in lines
+        if line.strip()
+    )
+
+    text = re.sub(
+        r"[^a-z0-9 ]+",
+        "",
+        text
+    )
+
+    return hashlib.sha256(
+        text.encode("utf-8")
+    ).hexdigest()
+
+
 # ============================================================
-# LOAD HISTORY
+# HISTORY
 # ============================================================
 
-def load_history():
-    """Load previously generated content."""
+def load_history() -> List[Dict[str, Any]]:
+    """
+    Load previous generated content.
+    """
 
     if not HISTORY_FILE.exists():
         return []
 
     try:
 
-        data = json.loads(
-            HISTORY_FILE.read_text(
-                encoding="utf-8"
-            )
-        )
+        with open(
+            HISTORY_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
 
-        if not isinstance(data, list):
-            return []
+            data = json.load(f)
 
-        return data
-
-    except Exception as exc:
-
-        print(
-            f"⚠️ Could not read history: {exc}"
-        )
+        if isinstance(data, list):
+            return data
 
         return []
 
+    except Exception:
+        return []
 
-# ============================================================
-# SAVE HISTORY
-# ============================================================
 
-def save_history(content: dict):
-    """Save generated Shayari to history."""
+def save_history(item: Dict[str, Any]) -> None:
+    """
+    Save generated content to history.
+    """
 
     history = load_history()
 
-    entry = {
-        "shayari": content.get(
-            "shayari",
-            ""
-        ).strip(),
-
-        "title": content.get(
-            "title",
-            ""
-        ).strip(),
-
-        "category": content.get(
-            "category",
-            ""
-        ).strip(),
-    }
-
-    history.append(entry)
+    history.append(item)
 
     history = history[-MAX_HISTORY:]
 
-    HISTORY_FILE.write_text(
-        json.dumps(
+    with open(
+        HISTORY_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
             history,
+            f,
             ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+            indent=2
+        )
+
+
+def is_duplicate(
+    lines: List[str],
+    history: List[Dict[str, Any]]
+) -> bool:
+
+    fingerprint = make_fingerprint(lines)
+
+    for item in history:
+
+        if item.get("fingerprint") == fingerprint:
+            return True
+
+    return False
+
+
+# ============================================================
+# STYLE SELECTION
+# ============================================================
+
+def choose_style(category: str) -> str:
+
+    if category in [
+        "heartbreak",
+        "bewafa",
+        "judai",
+        "dard",
+        "tanhai",
+        "missing someone",
+    ]:
+        return random.choice([
+            "deep_heartbreak",
+            "modern_sad",
+            "ghazal_classical",
+        ])
+
+    if category in [
+        "mohabbat",
+        "one sided love",
+        "intezaar",
+        "unspoken love",
+    ]:
+        return random.choice([
+            "romantic",
+            "ghazal_classical",
+            "deep_heartbreak",
+        ])
+
+    if category == "zindagi":
+        return "life_philosophy"
+
+    if category == "khamoshi":
+        return random.choice([
+            "deep_heartbreak",
+            "modern_sad",
+            "ghazal_classical",
+        ])
+
+    return random.choice(
+        list(LITERARY_DIRECTIONS.keys())
     )
 
 
 # ============================================================
-# NORMALIZE TEXT
+# GEMINI CLIENT
 # ============================================================
 
-def normalize_text(text: str) -> str:
-    """Normalize whitespace without changing Hinglish spelling."""
+def get_client():
 
-    text = str(text or "")
+    if not API_KEY:
+        raise RuntimeError(
+            "GOOGLE_API_KEY environment variable is missing."
+        )
 
-    text = text.replace(
-        "\r\n",
-        "\n"
+    return genai.Client(
+        api_key=API_KEY
     )
 
-    text = text.replace(
-        "\r",
-        "\n"
+
+# ============================================================
+# PROMPT
+# ============================================================
+
+def build_prompt(
+    category: str,
+    style: str,
+    history: List[Dict[str, Any]]
+) -> str:
+
+    direction = "\n".join(
+        f"- {x}"
+        for x in LITERARY_DIRECTIONS[style]
     )
 
-    # Remove excessive spaces.
+    previous = []
+
+    for item in history[-25:]:
+
+        lines = item.get("lines", [])
+
+        if lines:
+
+            previous.append(
+                " / ".join(
+                    line
+                    for line in lines
+                    if line.strip()
+                )
+            )
+
+    previous_text = "\n".join(
+        f"- {x}"
+        for x in previous
+    )
+
+    return f"""
+You are an experienced Hindi-Urdu poetry writer creating
+original short-form Shayari for a premium poetry Shorts channel.
+
+TASK:
+Create ONE original Shayari for the category:
+
+{category}
+
+LITERARY DIRECTION:
+{direction}
+
+IMPORTANT:
+
+1. Write ONLY in Roman Hindi / Hinglish.
+2. NEVER use Devanagari.
+3. Do not translate English sentences into Hindi.
+4. Natural Hindi/Urdu words written using Latin alphabet are preferred.
+5. Use emotionally mature language.
+6. Avoid generic AI motivational quotes.
+7. Avoid childish rhymes.
+8. Avoid overused social-media clichés.
+9. Do not use excessive emojis.
+10. Do not imitate a living poet's exact wording.
+11. Do not reproduce any known/copyrighted poem.
+12. Create completely ORIGINAL wording.
+13. The result should feel like serious Hindi-Urdu poetry.
+14. Prefer metaphor, emotional tension and understated pain.
+15. The final line should leave an emotional aftertaste.
+16. No explanation outside the requested JSON.
+
+REFERENCE TRADITION:
+
+The writing can draw inspiration from the broad literary
+traditions associated with classical Urdu/Hindi poetry,
+including themes found in works associated with:
+
+- Mirza Ghalib
+- Mir Taqi Mir
+- Dushyant Kumar
+- Gulzar
+- Firaq Gorakhpuri
+- Jaun Elia
+- Parveen Shakir
+- Khwaja Haider Ali Aatish
+- Nida Fazli
+
+But DO NOT copy their poems, ghazals or recognizable lines.
+
+LENGTH:
+
+4 to 8 poetic lines.
+
+FORMAT:
+
+Use intentional blank lines between emotional blocks.
+
+Example formatting:
+
+[
+  "Pehli line,",
+  "doosri line,",
+  "",
+  "teesri line,",
+  "chauthi line.",
+  "",
+  "aakhri gehri line."
+]
+
+The blank strings are intentional visual spacing.
+
+Do NOT put every sentence on one line.
+
+Do NOT make every line extremely short.
+
+The poetry should look beautiful when rendered as
+large static typography on a vertical 9:16 video.
+
+PREVIOUS CONTENT:
+
+The following content has already been used.
+Do NOT create anything substantially similar:
+
+{previous_text}
+
+Return ONLY valid JSON:
+
+{{
+  "category": "{category}",
+  "style": "{style}",
+  "lines": [
+    "line 1",
+    "line 2",
+    "",
+    "line 3",
+    "line 4"
+  ],
+  "theme": "short theme description",
+  "emotion": "primary emotion",
+  "title_hook": "short emotional hook"
+}}
+"""
+
+
+# ============================================================
+# GEMINI GENERATION
+# ============================================================
+
+def generate_raw(
+    category: str,
+    style: str,
+    history: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+
+    client = get_client()
+
+    prompt = build_prompt(
+        category,
+        style,
+        history
+    )
+
+    response = client.models.generate_content(
+
+        model=MODEL,
+
+        contents=prompt,
+
+        config=types.GenerateContentConfig(
+
+            temperature=1.0,
+
+            response_mime_type="application/json",
+
+            max_output_tokens=1800,
+        )
+    )
+
+    text = response.text
+
+    if not text:
+        raise RuntimeError(
+            "Gemini returned an empty response."
+        )
+
+    text = text.strip()
+
+    # Remove accidental markdown JSON fences
     text = re.sub(
-        r"[ \t]+",
-        " ",
-        text
-    )
-
-    # Remove excessive blank lines.
-    text = re.sub(
-        r"\n{3,}",
-        "\n\n",
-        text
-    )
-
-    return text.strip()
-
-
-# ============================================================
-# CLEAN SHAYARI
-# ============================================================
-
-def clean_shayari(text: str) -> str:
-    """Clean Gemini output while preserving line structure."""
-
-    text = normalize_text(text)
-
-    # Remove accidental markdown code fences.
-    text = re.sub(
-        r"^```(?:text|txt)?\s*",
+        r"^```json\s*",
         "",
         text,
         flags=re.IGNORECASE
@@ -214,548 +636,633 @@ def clean_shayari(text: str) -> str:
         text
     )
 
-    # Remove common labels Gemini may add.
-    text = re.sub(
-        r"^(shayari|poem|text)\s*:\s*",
-        "",
-        text,
-        flags=re.IGNORECASE
-    )
+    data = json.loads(text)
 
-    # Remove leading numbering.
-    lines = []
-
-    for line in text.splitlines():
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        line = re.sub(
-            r"^\d+[\.\)\-:]\s*",
-            "",
-            line
-        )
-
-        # Remove bullets.
-        line = re.sub(
-            r"^[•●▪️\-]\s*",
-            "",
-            line
-        )
-
-        lines.append(line)
-
-    return "\n".join(lines).strip()
-
-
-# ============================================================
-# CLEAN TITLE
-# ============================================================
-
-def clean_title(title: str) -> str:
-    """Clean and limit YouTube title."""
-
-    title = normalize_text(title)
-
-    title = title.replace(
-        "\n",
-        " "
-    )
-
-    title = title.strip(
-        "\"'` "
-    )
-
-    # Remove accidental title label.
-    title = re.sub(
-        r"^title\s*:\s*",
-        "",
-        title,
-        flags=re.IGNORECASE
-    )
-
-    if len(title) > 100:
-        title = title[:97].rstrip() + "..."
-
-    return title
-
-
-# ============================================================
-# CLEAN HASHTAGS
-# ============================================================
-
-def clean_hashtags(hashtags):
-    """Normalize hashtag list."""
-
-    if not isinstance(
-        hashtags,
-        list
-    ):
-        return []
-
-    cleaned = []
-
-    for hashtag in hashtags:
-
-        hashtag = str(
-            hashtag
-        ).strip()
-
-        hashtag = hashtag.replace(
-            " ",
-            ""
-        )
-
-        if not hashtag:
-            continue
-
-        if not hashtag.startswith("#"):
-            hashtag = "#" + hashtag
-
-        # Hashtags should not contain Devanagari.
-        if contains_devanagari(
-            hashtag
-        ):
-            continue
-
-        if hashtag.lower() not in [
-            x.lower()
-            for x in cleaned
-        ]:
-            cleaned.append(
-                hashtag
-            )
-
-    # Always include Shorts.
-    if not any(
-        x.lower() == "#shorts"
-        for x in cleaned
-    ):
-        cleaned.append(
-            "#Shorts"
-        )
-
-    return cleaned[:15]
-
-
-# ============================================================
-# CLEAN TAGS
-# ============================================================
-
-def clean_tags(tags):
-    """Normalize YouTube SEO tags."""
-
-    if not isinstance(
-        tags,
-        list
-    ):
-        return []
-
-    cleaned = []
-
-    for tag in tags:
-
-        tag = normalize_text(
-            tag
-        )
-
-        tag = tag.replace(
-            "\n",
-            " "
-        )
-
-        tag = tag.strip(
-            "\"'` "
-        )
-
-        if not tag:
-            continue
-
-        if contains_devanagari(
-            tag
-        ):
-            continue
-
-        if tag.lower() not in [
-            x.lower()
-            for x in cleaned
-        ]:
-            cleaned.append(
-                tag
-            )
-
-    return cleaned[:30]
-
-
-# ============================================================
-# FALLBACK CONTENT
-# ============================================================
-
-def fallback_content(category: str):
-    """
-    Emergency fallback if Gemini fails.
-
-    These are generic original lines and should only be used
-    when AI generation is unavailable.
-    """
-
-    fallback_pool = [
-
-        [
-            "Kuch log paas hokar bhi apne nahi hote,",
-            "Aur kuch door rehkar bhi dil ke kareeb hote hain.",
-        ],
-
-        [
-            "Waqt badla to sabke chehre badal gaye,",
-            "Hum wahi rahe, bas rishte sambhal gaye.",
-        ],
-
-        [
-            "Khamoshi bhi bahut kuch keh jaati hai,",
-            "Bas samajhne wala koi chahiye.",
-        ],
-
-        [
-            "Yaadein kabhi purani nahi hoti,",
-            "Bas unhe yaad karne ki aadat badal jaati hai.",
-        ],
-
-        [
-            "Jise dil se chaha tha,",
-            "Usi ne humein khamoshi sikha di.",
-        ],
-
-    ]
-
-    lines = random.choice(
-        fallback_pool
-    )
-
-    shayari = "\n".join(
-        lines
-    )
-
-    return {
-        "shayari": shayari,
-
-        "title": "Kuch Baatein Dil Mein Reh Jaati Hain",
-
-        "description": (
-            "Kuch ehsaas lafzon mein kehna mushkil hota hai. "
-            "Agar ye lines dil ko chhoo gayi ho to share zaroor karein.\n\n"
-            "#Shorts #Shayari #HinglishShayari #LoveShayari"
-        ),
-
-        "hashtags": [
-            "#Shorts",
-            "#Shayari",
-            "#HinglishShayari",
-            "#LoveShayari",
-            "#SadShayari",
-        ],
-
-        "tags": [
-            "shayari",
-            "hinglish shayari",
-            "roman hindi shayari",
-            "love shayari",
-            "sad shayari",
-            "heart touching shayari",
-            "hindi shayari",
-            "shayari shorts",
-            "shorts",
-        ],
-
-        "category": category,
-    }
-
-
-# ============================================================
-# BUILD PROMPT
-# ============================================================
-
-def build_prompt(
-    category: str,
-    history: list
-) -> str:
-
-    recent_shayari = []
-
-    for item in history[-30:]:
-
-        if isinstance(
-            item,
-            dict
-        ):
-
-            text = item.get(
-                "shayari",
-                ""
-            )
-
-            if text:
-                recent_shayari.append(
-                    text
-                )
-
-    history_text = "\n---\n".join(
-        recent_shayari
-    )
-
-    if not history_text:
-        history_text = "No previous Shayari available."
-
-    return f"""
-You are an expert Indian short-form poetry writer.
-
-Create ONE completely original Shayari for a YouTube Short.
-
-CATEGORY:
-{category}
-
-IMPORTANT LANGUAGE RULE:
-Write ONLY in Roman Hindi / Hinglish.
-
-Use English alphabet only.
-
-DO NOT use:
-- Devanagari Hindi
-- Urdu script
-- Hindi Unicode characters
-- Sanskrit script
-- Transliteration mixed with Devanagari
-
-Example of acceptable style:
-"Uski yaadon ka silsila aaj bhi wahi hai,
-Bas hum badal gaye, yaadein nahi."
-
-The Shayari should feel natural for Indian social media.
-
-STYLE:
-- emotional
-- simple
-- relatable
-- poetic
-- cinematic
-- easy to read
-- modern
-- human sounding
-- suitable for a 15 second Short
-
-LENGTH:
-4 to 8 short lines.
-
-IMPORTANT:
-- Do not make every line extremely long.
-- Avoid complicated vocabulary.
-- Avoid excessive emojis.
-- Do not put emojis inside the Shayari.
-- Do not copy famous Shayari.
-- Do not imitate a living poet.
-- Do not mention that you are AI.
-- Do not add explanations.
-- Do not add quotation marks around the Shayari.
-
-The following are previous Shayaris.
-Do NOT repeat them or create something substantially similar:
-
-{history_text}
-
-Return ONLY valid JSON.
-
-Required JSON structure:
-
-{{
-  "shayari": "4 to 8 lines separated by newline",
-  "title": "short YouTube title",
-  "description": "YouTube description",
-  "hashtags": [
-    "#Shorts",
-    "#Shayari"
-  ],
-  "tags": [
-    "shayari",
-    "hinglish shayari"
-  ],
-  "category": "{category}"
-}}
-
-TITLE:
-- Roman Hindi / Hinglish only
-- Maximum 100 characters
-- Emotional and clickable
-- No misleading clickbait
-
-DESCRIPTION:
-- Roman Hindi / Hinglish only
-- 2 to 4 short sentences
-- Natural
-- Include relevant hashtags
-
-HASHTAGS:
-Generate 5 to 12 relevant hashtags.
-
-TAGS:
-Generate 8 to 20 YouTube SEO tags.
-
-Again:
-ONLY Roman/Hinglish.
-NO Devanagari.
-ONLY JSON.
-"""
-
-
-# ============================================================
-# VALIDATE RESPONSE
-# ============================================================
-
-def validate_response(data: dict):
-    """Validate Gemini response."""
-
-    if not isinstance(
-        data,
-        dict
-    ):
+    if not isinstance(data, dict):
         raise ValueError(
             "Gemini response is not a JSON object."
-        )
-
-    required = [
-        "shayari",
-        "title",
-        "description",
-        "hashtags",
-        "tags",
-        "category",
-    ]
-
-    for key in required:
-
-        if key not in data:
-            raise ValueError(
-                f"Missing field: {key}"
-            )
-
-    shayari = clean_shayari(
-        data["shayari"]
-    )
-
-    title = clean_title(
-        data["title"]
-    )
-
-    description = normalize_text(
-        data["description"]
-    )
-
-    # ---------------------------------------------
-    # Roman/Hinglish check
-    # ---------------------------------------------
-
-    combined_text = (
-        shayari
-        + "\n"
-        + title
-        + "\n"
-        + description
-    )
-
-    if contains_devanagari(
-        combined_text
-    ):
-        raise ValueError(
-            "Gemini returned Devanagari text."
-        )
-
-    # ---------------------------------------------
-    # Minimum quality
-    # ---------------------------------------------
-
-    lines = [
-        line.strip()
-        for line in shayari.splitlines()
-        if line.strip()
-    ]
-
-    if len(lines) < 2:
-        raise ValueError(
-            "Shayari has too few lines."
-        )
-
-    if len(shayari) < 30:
-        raise ValueError(
-            "Shayari is too short."
-        )
-
-    # ---------------------------------------------
-    # Clean fields
-    # ---------------------------------------------
-
-    data["shayari"] = shayari
-    data["title"] = title
-    data["description"] = description
-
-    data["hashtags"] = clean_hashtags(
-        data["hashtags"]
-    )
-
-    data["tags"] = clean_tags(
-        data["tags"]
-    )
-
-    data["category"] = normalize_text(
-        data["category"]
-    )
-
-    # Ensure Shorts hashtag.
-    if not any(
-        x.lower() == "#shorts"
-        for x in data["hashtags"]
-    ):
-        data["hashtags"].insert(
-            0,
-            "#Shorts"
         )
 
     return data
 
 
 # ============================================================
-# GEMINI CLIENT
+# VALIDATION
 # ============================================================
 
-def get_client():
+def validate_shayari(
+    data: Dict[str, Any]
+) -> Dict[str, Any]:
 
-    api_key = os.getenv(
-        "GOOGLE_API_KEY"
-    )
-
-    if not api_key:
-
-        raise RuntimeError(
-            "GOOGLE_API_KEY environment variable is missing."
+    if not isinstance(data, dict):
+        raise ValueError(
+            "Invalid Shayari object."
         )
 
-    return genai.Client(
-        api_key=api_key
+    lines = data.get("lines")
+
+    if not isinstance(lines, list):
+        raise ValueError(
+            "Shayari lines are missing."
+        )
+
+    lines = normalize_lines(lines)
+
+    non_empty = [
+        line
+        for line in lines
+        if line.strip()
+    ]
+
+    if len(non_empty) < 4:
+        raise ValueError(
+            "Shayari must contain at least 4 lines."
+        )
+
+    if len(non_empty) > 8:
+        raise ValueError(
+            "Shayari must contain no more than 8 lines."
+        )
+
+    combined = "\n".join(lines)
+
+    if contains_devanagari(combined):
+        raise ValueError(
+            "Devanagari detected. Roman Hindi required."
+        )
+
+    # Reject obvious markdown
+    if "```" in combined:
+        raise ValueError(
+            "Markdown detected."
+        )
+
+    # Reject accidental list formatting
+    for line in non_empty:
+
+        if re.match(
+            r"^\d+[\.\)]\s",
+            line
+        ):
+            raise ValueError(
+                "Numbered list detected."
+            )
+
+    # Avoid excessive emojis
+    emoji_count = len(
+        re.findall(
+            r"[^\x00-\x7F]",
+            combined
+        )
     )
 
+    if emoji_count > 3:
+        raise ValueError(
+            "Too many non-ASCII characters."
+        )
+
+    data["lines"] = lines
+
+    data["category"] = clean_text(
+        data.get(
+            "category",
+            "shayari"
+        )
+    )
+
+    data["style"] = clean_text(
+        data.get(
+            "style",
+            "modern_sad"
+        )
+    )
+
+    data["theme"] = clean_text(
+        data.get(
+            "theme",
+            ""
+        )
+    )
+
+    data["emotion"] = clean_text(
+        data.get(
+            "emotion",
+            ""
+        )
+    )
+
+    data["title_hook"] = clean_text(
+        data.get(
+            "title_hook",
+            ""
+        )
+    )
+
+    return data
+
 
 # ============================================================
-# GENERATE SHAYARI
+# SEO KEYWORD POOL
 # ============================================================
 
-def generate_shayari():
-    """
-    Generate one original Hinglish Shayari.
+BASE_KEYWORDS = [
+    "shayari",
+    "hindi shayari",
+    "hindishayari",
+    "shayari status",
+    "hindi poetry",
+    "urdu poetry",
+    "poetry",
+]
 
-    Automatically retries invalid AI output.
-    """
 
-    client = get_client()
+CATEGORY_KEYWORDS = {
+
+    "sad love": [
+        "sad love shayari",
+        "love shayari",
+        "sad shayari",
+        "heart touching shayari",
+        "emotional shayari",
+    ],
+
+    "heartbreak": [
+        "heartbreak shayari",
+        "broken heart shayari",
+        "dard bhari shayari",
+        "sad shayari",
+        "heart touching poetry",
+    ],
+
+    "one sided love": [
+        "one sided love shayari",
+        "one sided love",
+        "sad love shayari",
+        "mohabbat shayari",
+        "heart touching shayari",
+    ],
+
+    "bewafa": [
+        "bewafa shayari",
+        "bewafai shayari",
+        "dard bhari shayari",
+        "sad love shayari",
+        "heartbreak shayari",
+    ],
+
+    "judai": [
+        "judai shayari",
+        "dard e judai",
+        "sad shayari",
+        "dard bhari shayari",
+        "heart touching poetry",
+    ],
+
+    "yaadein": [
+        "yaadein shayari",
+        "yaadon ki shayari",
+        "sad shayari",
+        "emotional poetry",
+        "heart touching shayari",
+    ],
+
+    "khamoshi": [
+        "khamoshi shayari",
+        "silent love shayari",
+        "deep shayari",
+        "emotional shayari",
+        "heart touching poetry",
+    ],
+
+    "mohabbat": [
+        "mohabbat shayari",
+        "love shayari",
+        "romantic shayari",
+        "ishq shayari",
+        "heart touching shayari",
+    ],
+
+    "intezaar": [
+        "intezaar shayari",
+        "waiting for someone shayari",
+        "mohabbat shayari",
+        "sad love shayari",
+        "heart touching poetry",
+    ],
+
+    "dard": [
+        "dard shayari",
+        "dard bhari shayari",
+        "sad shayari",
+        "emotional shayari",
+        "heart touching poetry",
+    ],
+
+    "tanhai": [
+        "tanhai shayari",
+        "alone shayari",
+        "sad shayari",
+        "lonely poetry",
+        "dard bhari shayari",
+    ],
+
+    "zindagi": [
+        "zindagi shayari",
+        "life shayari",
+        "zindagi quotes",
+        "deep shayari",
+        "hindi poetry",
+    ],
+
+    "attitude": [
+        "attitude shayari",
+        "attitude status",
+        "royal attitude shayari",
+        "hindi attitude shayari",
+        "shayari status",
+    ],
+
+    "deep feelings": [
+        "deep shayari",
+        "deep feelings shayari",
+        "emotional shayari",
+        "heart touching poetry",
+        "hindi poetry",
+    ],
+
+    "missing someone": [
+        "miss you shayari",
+        "missing someone shayari",
+        "sad love shayari",
+        "yaadein shayari",
+        "heart touching shayari",
+    ],
+
+    "unspoken love": [
+        "unspoken love shayari",
+        "silent love shayari",
+        "one sided love",
+        "mohabbat shayari",
+        "heart touching poetry",
+    ],
+}
+
+
+# ============================================================
+# SEO GENERATOR
+# ============================================================
+
+def build_seo(
+    data: Dict[str, Any]
+) -> Dict[str, Any]:
+
+    category = data.get(
+        "category",
+        "sad love"
+    ).lower()
+
+    hook = data.get(
+        "title_hook",
+        ""
+    ).strip()
+
+    if not hook:
+
+        first_lines = [
+            line
+            for line in data["lines"]
+            if line.strip()
+        ]
+
+        hook = (
+            first_lines[0]
+            if first_lines
+            else "Dil Ki Baat"
+        )
+
+    # Keep title reasonably short.
+    hook = hook[:65].strip()
+
+    keyword_pool = list(
+        dict.fromkeys(
+            BASE_KEYWORDS
+            + CATEGORY_KEYWORDS.get(
+                category,
+                []
+            )
+        )
+    )
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    title_templates = [
+
+        "{hook} 💔 | Dard Bhari Shayari | Heart Touching Poetry",
+
+        "{hook} 💔 | {category_title} | Hindi Shayari",
+
+        "{hook} | Heart Touching Shayari 💔 | Hindi Poetry",
+
+        "{hook} 💔 | Sad Shayari | Emotional Poetry",
+
+    ]
+
+    category_title = category.title()
+
+    template = random.choice(
+        title_templates
+    )
+
+    title = template.format(
+        hook=hook,
+        category_title=category_title
+    )
+
+    title = re.sub(
+        r"\s+",
+        " ",
+        title
+    ).strip()
+
+    # YouTube title length safety
+    title = title[:100].rstrip()
+
+    # --------------------------------------------------------
+    # HASHTAGS
+    # --------------------------------------------------------
+
+    hashtag_map = {
+
+        "sad love": [
+            "#Shayari",
+            "#SadShayari",
+            "#LoveShayari",
+            "#HeartTouchingShayari",
+            "#Shorts",
+        ],
+
+        "heartbreak": [
+            "#Shayari",
+            "#DardBhariShayari",
+            "#Heartbreak",
+            "#SadShayari",
+            "#Shorts",
+        ],
+
+        "one sided love": [
+            "#Shayari",
+            "#OneSidedLove",
+            "#LoveShayari",
+            "#SadShayari",
+            "#Shorts",
+        ],
+
+        "bewafa": [
+            "#Shayari",
+            "#BewafaShayari",
+            "#SadShayari",
+            "#DardBhariShayari",
+            "#Shorts",
+        ],
+
+        "judai": [
+            "#Shayari",
+            "#JudaiShayari",
+            "#SadShayari",
+            "#HeartTouchingShayari",
+            "#Shorts",
+        ],
+
+        "yaadein": [
+            "#Shayari",
+            "#Yaadein",
+            "#SadShayari",
+            "#EmotionalShayari",
+            "#Shorts",
+        ],
+
+        "khamoshi": [
+            "#Shayari",
+            "#Khamoshi",
+            "#DeepShayari",
+            "#HeartTouchingPoetry",
+            "#Shorts",
+        ],
+
+        "mohabbat": [
+            "#Shayari",
+            "#Mohabbat",
+            "#LoveShayari",
+            "#Ishq",
+            "#Shorts",
+        ],
+
+        "intezaar": [
+            "#Shayari",
+            "#Intezaar",
+            "#LoveShayari",
+            "#SadShayari",
+            "#Shorts",
+        ],
+
+        "dard": [
+            "#Shayari",
+            "#DardBhariShayari",
+            "#SadShayari",
+            "#EmotionalShayari",
+            "#Shorts",
+        ],
+
+        "tanhai": [
+            "#Shayari",
+            "#Tanhai",
+            "#AloneShayari",
+            "#SadShayari",
+            "#Shorts",
+        ],
+
+        "zindagi": [
+            "#Shayari",
+            "#ZindagiShayari",
+            "#LifeShayari",
+            "#HindiPoetry",
+            "#Shorts",
+        ],
+
+        "attitude": [
+            "#Shayari",
+            "#AttitudeShayari",
+            "#AttitudeStatus",
+            "#HindiShayari",
+            "#Shorts",
+        ],
+
+        "deep feelings": [
+            "#Shayari",
+            "#DeepShayari",
+            "#EmotionalShayari",
+            "#HeartTouchingPoetry",
+            "#Shorts",
+        ],
+
+        "missing someone": [
+            "#Shayari",
+            "#MissYou",
+            "#SadShayari",
+            "#LoveShayari",
+            "#Shorts",
+        ],
+
+        "unspoken love": [
+            "#Shayari",
+            "#UnspokenLove",
+            "#OneSidedLove",
+            "#LoveShayari",
+            "#Shorts",
+        ],
+    }
+
+    hashtags = hashtag_map.get(
+        category,
+        [
+            "#Shayari",
+            "#HindiShayari",
+            "#Poetry",
+            "#HeartTouching",
+            "#Shorts",
+        ]
+    )
+
+    # --------------------------------------------------------
+    # DESCRIPTION
+    # --------------------------------------------------------
+
+    poetry_preview = "\n".join(
+        line
+        for line in data["lines"]
+        if line.strip()
+    )
+
+    description = f"""
+{poetry_preview}
+
+A collection of heartfelt Hindi-Urdu poetry written in Roman Hindi,
+for those who understand the silence behind words.
+
+Agar aapko Shayari, Hindi Shayari, Sad Shayari, Love Shayari,
+Dard Bhari Shayari, Heart Touching Poetry, Emotional Shayari,
+Urdu Poetry aur deep feelings wali poetry pasand hai,
+toh ye Shayari aapke liye hai.
+
+Kabhi mohabbat lafzon mein nahi hoti,
+kabhi dard awaaz nahi karta,
+aur kabhi khamoshi sab kuch keh jaati hai.
+
+Apne ehsaas comments mein zaroor likhna.
+
+Follow / Subscribe for more:
+• Hindi Shayari
+• Sad Shayari
+• Love Shayari
+• Heart Touching Poetry
+• Dard Bhari Shayari
+• Emotional Poetry
+• Urdu Poetry
+
+{ " ".join(hashtags) }
+""".strip()
+
+    # --------------------------------------------------------
+    # TAGS
+    # --------------------------------------------------------
+
+    tags = list(
+        dict.fromkeys(
+            keyword_pool
+            + [
+                "heart touching",
+                "heart touching poetry",
+                "emotional poetry",
+                "dard bhari poetry",
+                "best shayari",
+                "shayari video",
+                "shayari shorts",
+                "youtube shorts",
+                "shorts",
+                "viral shayari",
+                "trending shayari",
+                "roman hindi shayari",
+                "hinglish shayari",
+                "urdu shayari",
+            ]
+        )
+    )
+
+    # YouTube tag field safety
+    clean_tags = []
+
+    for tag in tags:
+
+        tag = tag.strip()
+
+        if tag and tag not in clean_tags:
+            clean_tags.append(tag)
+
+    # --------------------------------------------------------
+    # RETURN SEO
+    # --------------------------------------------------------
+
+    return {
+        "title": title,
+        "description": description,
+        "hashtags": hashtags,
+        "tags": clean_tags,
+    }
+
+
+# ============================================================
+# FALLBACK
+# ============================================================
+
+def get_fallback() -> Dict[str, Any]:
+
+    item = random.choice(
+        FALLBACK_SHAYARI
+    )
+
+    data = {
+        "category": item["category"],
+        "style": item["style"],
+        "lines": item["lines"],
+        "theme": item["category"],
+        "emotion": "deep emotion",
+        "title_hook": (
+            item["lines"][0]
+            if item["lines"]
+            else "Dil Ki Baat"
+        ),
+    }
+
+    data = validate_shayari(
+        data
+    )
+
+    seo = build_seo(
+        data
+    )
+
+    data["seo"] = seo
+
+    return data
+
+
+# ============================================================
+# MAIN GENERATOR
+# ============================================================
+
+def generate_shayari() -> Dict[str, Any]:
 
     history = load_history()
 
@@ -763,170 +1270,88 @@ def generate_shayari():
         CATEGORIES
     )
 
-    prompt = build_prompt(
-        category=category,
-        history=history,
+    style = choose_style(
+        category
     )
 
-    print(
-        f"🎭 Category: {category}"
-    )
+    # --------------------------------------------------------
+    # Try Gemini multiple times
+    # --------------------------------------------------------
 
-    max_attempts = 3
-
-    for attempt in range(
-        1,
-        max_attempts + 1
-    ):
+    for attempt in range(3):
 
         try:
 
-            print(
-                f"🤖 Gemini generation "
-                f"attempt {attempt}/{max_attempts}..."
+            data = generate_raw(
+                category=category,
+                style=style,
+                history=history
             )
 
-            response = client.models.generate_content(
-
-                model=MODEL,
-
-                contents=prompt,
-
-                config=types.GenerateContentConfig(
-
-                    temperature=1.0,
-
-                    response_mime_type="application/json",
-
-                    max_output_tokens=1500,
-                ),
-            )
-
-            raw_text = (
-                response.text
-                if response
-                else ""
-            )
-
-            if not raw_text:
-                raise ValueError(
-                    "Gemini returned empty response."
-                )
-
-            # -------------------------------------
-            # Parse JSON
-            # -------------------------------------
-
-            raw_text = raw_text.strip()
-
-            # Remove accidental code fences.
-            raw_text = re.sub(
-                r"^```json\s*",
-                "",
-                raw_text,
-                flags=re.IGNORECASE
-            )
-
-            raw_text = re.sub(
-                r"\s*```$",
-                "",
-                raw_text
-            )
-
-            data = json.loads(
-                raw_text
-            )
-
-            # -------------------------------------
-            # Validate
-            # -------------------------------------
-
-            data = validate_response(
+            data = validate_shayari(
                 data
             )
 
-            # -------------------------------------
-            # Duplicate check
-            # -------------------------------------
-
-            normalized_new = re.sub(
-                r"\s+",
-                " ",
-                data["shayari"].lower()
-            ).strip()
-
-            duplicate = False
-
-            for item in history:
-
-                if not isinstance(
-                    item,
-                    dict
-                ):
-                    continue
-
-                old = re.sub(
-                    r"\s+",
-                    " ",
-                    str(
-                        item.get(
-                            "shayari",
-                            ""
-                        )
-                    ).lower()
-                ).strip()
-
-                if normalized_new == old:
-                    duplicate = True
-                    break
-
-            if duplicate:
-
+            if is_duplicate(
+                data["lines"],
+                history
+            ):
                 print(
-                    "⚠️ Duplicate Shayari detected."
+                    "⚠️ Duplicate Shayari detected. Retrying..."
                 )
-
-                # Add extra instruction for next attempt.
-                prompt += """
-
-IMPORTANT:
-The previous generated result was a duplicate.
-Create something completely different in imagery,
-wording, emotion and sentence structure.
-"""
-
                 continue
 
+            seo = build_seo(
+                data
+            )
+
+            data["seo"] = seo
+
+            fingerprint = make_fingerprint(
+                data["lines"]
+            )
+
+            data["fingerprint"] = fingerprint
+
+            print()
+            print("=" * 60)
+            print("NEW SHAYARI GENERATED")
+            print("=" * 60)
+
             print(
-                "✅ Original Hinglish Shayari generated."
+                "\n".join(
+                    data["lines"]
+                )
+            )
+
+            print()
+            print("Category:", data["category"])
+            print("Style:", data["style"])
+            print("Emotion:", data["emotion"])
+
+            print()
+            print("TITLE:")
+            print(data["seo"]["title"])
+
+            print()
+            print("HASHTAGS:")
+            print(
+                " ".join(
+                    data["seo"]["hashtags"]
+                )
             )
 
             return data
 
-        except json.JSONDecodeError as exc:
+        except Exception as e:
 
             print(
-                f"⚠️ Invalid JSON from Gemini: {exc}"
+                f"⚠️ Shayari generation attempt "
+                f"{attempt + 1}/3 failed: {e}"
             )
-
-        except Exception as exc:
-
-            print(
-                f"⚠️ Generation attempt failed: {exc}"
-            )
-
-        # Add stronger instruction before retry.
-        prompt += """
-
-RETRY INSTRUCTION:
-Return ONLY valid JSON.
-Use ONLY Roman/Hinglish English alphabet.
-Do not use Devanagari.
-Make the Shayari different from previous attempts.
-"""
 
     # --------------------------------------------------------
-    # Gemini completely failed
+    # Gemini failed → fallback
     # --------------------------------------------------------
 
     print(
@@ -934,48 +1359,74 @@ Make the Shayari different from previous attempts.
     )
 
     print(
-        "🔄 Using emergency fallback Shayari."
+        "Using fallback Shayari."
     )
 
-    return fallback_content(
-        category
-    )
+    return get_fallback()
 
 
 # ============================================================
-# TEST MODE
+# SAVE GENERATED CONTENT
+# ============================================================
+
+def generate_and_save() -> Dict[str, Any]:
+
+    data = generate_shayari()
+
+    save_history({
+        "fingerprint": data.get(
+            "fingerprint",
+            make_fingerprint(
+                data["lines"]
+            )
+        ),
+
+        "lines": data["lines"],
+
+        "category": data.get(
+            "category",
+            ""
+        ),
+
+        "style": data.get(
+            "style",
+            ""
+        ),
+
+        "title": data["seo"]["title"],
+
+        "created_at": (
+            __import__("datetime")
+            .datetime.utcnow()
+            .isoformat()
+            + "Z"
+        ),
+    })
+
+    return data
+
+
+# ============================================================
+# CLI TEST
 # ============================================================
 
 if __name__ == "__main__":
 
-    print("=" * 70)
-    print("💔 HINGLISH SHAYARI GENERATOR TEST")
-    print("=" * 70)
+    print(
+        "Starting Hinglish Shayari Generator..."
+    )
 
-    result = generate_shayari()
+    result = generate_and_save()
 
-    print("\n📝 SHAYARI")
-    print("-" * 70)
-    print(result["shayari"])
+    print()
+    print("=" * 60)
+    print("FINAL JSON")
+    print("=" * 60)
 
-    print("\n🎬 TITLE")
-    print("-" * 70)
-    print(result["title"])
-
-    print("\n📄 DESCRIPTION")
-    print("-" * 70)
-    print(result["description"])
-
-    print("\n🏷️ HASHTAGS")
-    print("-" * 70)
-    print(" ".join(result["hashtags"]))
-
-    print("\n🔖 TAGS")
-    print("-" * 70)
-    print(", ".join(result["tags"]))
-
-    print("\n📂 CATEGORY")
-    print("-" * 70)
-    print(result["category"])
-
-    print("=" * 70)
+    print(
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2
+        )
+    )
