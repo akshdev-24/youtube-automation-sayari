@@ -62,5 +62,44 @@
     "style": "sad romantic",
     "emotion": "lost love",
     "_gemini_model": "gemini-3.6-flash"
+  },
+  {
+    "shayari": "Intezaar karte karte shaam dhal gayi,\nkhamoshi se meri har baat badal gayi.\n\nTum aaye nahi, phir bhi yakeen raha,\nshayad kisi mod par mulaqat hogi.",
+    "title": "Intezaar Ab Bhi Hai 💔 | Love Shayari | Hindi Poetry",
+    "description": "Intezaar Ab Bhi Hai 💔 | Love Shayari | Hindi Poetry\n\nHeart touching Roman Hindi Shayari for anyone who has ever loved, waited or silently missed someone.\n\nOriginal emotional poetry.",
+    "hashtags": [
+      "#Shayari",
+      "#SadShayari",
+      "#LoveShayari",
+      "#EmotionalShayari",
+      "#HeartTouchingPoetry",
+      "#Shorts"
+    ],
+    "tags": [
+      "shayari",
+      "hindi shayari",
+      "sad shayari",
+      "love shayari",
+      "heart touching shayari",
+      "emotional shayari",
+      "dard bhari shayari",
+      "deep shayari",
+      "romantic shayari",
+      "broken heart shayari",
+      "urdu poetry",
+      "poetry",
+      "hindi poetry",
+      "emotional poetry",
+      "heart touching poetry",
+      "sad poetry",
+      "love poetry",
+      "deep poetry",
+      "shayari shorts",
+      "shorts"
+    ],
+    "category": "intezaar",
+    "style": "romantic",
+    "emotion": "hopeful longing",
+    "_gemini_model": "gemini-3.6-flash"
   }
 ]
