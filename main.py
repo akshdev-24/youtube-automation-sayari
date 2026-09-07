@@ -1,121 +1,58 @@
 # ============================================================
 # FILE: main.py
-# HINGLISH / ROMAN HINDI SHAYARI SHORTS AUTOMATION
+# ============================================================
+#
+# HINGLISH SHAYARI YOUTUBE SHORTS AUTOMATION
+#
+# PIPELINE:
+#
+# Gemini
+#    ↓
+# Shayari
+#    ↓
+# SEO title
+#    ↓
+# Queries
+#    ↓
+# Hashtags
+#    ↓
+# Tags
+#    ↓
+# Video
+#    ↓
+# YouTube UNLISTED
+#
 # ============================================================
 
-import os
-import sys
+from __future__ import annotations
+
 import json
-import time
 import logging
-from pathlib import Path
+import os
+import random
+import re
+import sys
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
-from src.shayari_generator import (
-    generate_shayari,
-    save_history,
+
+# ============================================================
+# PROJECT PATH
+# ============================================================
+
+ROOT_DIR = Path(
+    __file__
+).resolve().parent
+
+OUTPUT_DIR = (
+    ROOT_DIR / "output"
 )
 
-from src.shayari_video import create_video
-
-from src.uploader import upload_short_to_youtube
-
-
-# ============================================================
-# PATHS
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-
-OUTPUT_DIR = BASE_DIR / "output"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-HISTORY_FILE = BASE_DIR / "content_history.json"
-
-
-# ============================================================
-# SETTINGS
-# ============================================================
-
-VIDEO_DURATION = int(
-    os.getenv("SHAYARI_DURATION", "15")
+OUTPUT_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
 )
-
-YOUTUBE_UPLOAD = (
-    os.getenv("YOUTUBE_UPLOAD", "true").lower()
-    == "true"
-)
-
-PIPELINE_RETRIES = int(
-    os.getenv("PIPELINE_RETRIES", "3")
-)
-
-RETRY_DELAY = int(
-    os.getenv("RETRY_DELAY", "15")
-)
-
-
-# ============================================================
-# GEMINI MODEL SWAP
-# ============================================================
-#
-# Models are tried in this order.
-#
-# If one model:
-#   - gives 429
-#   - quota exhausted
-#   - invalid response
-#   - temporary failure
-#
-# the generator can move to the next model.
-#
-# These can also be overridden from GitHub Actions.
-#
-# Example:
-#
-# GEMINI_MODELS="gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash"
-#
-# ============================================================
-
-DEFAULT_GEMINI_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.7-flash",
-    "gemini-3.8-flash",
-]
-
-
-def get_gemini_models():
-    """
-    Read Gemini model priority from environment.
-
-    Example:
-        GEMINI_MODELS=gemini-3.6-flash,gemini-3.7-flash
-    """
-
-    raw = os.getenv(
-        "GEMINI_MODELS",
-        ""
-    ).strip()
-
-    if not raw:
-        return DEFAULT_GEMINI_MODELS.copy()
-
-    models = []
-
-    for model in raw.split(","):
-
-        model = model.strip()
-
-        if model and model not in models:
-            models.append(model)
-
-    if not models:
-        return DEFAULT_GEMINI_MODELS.copy()
-
-    return models
-
-
-GEMINI_MODELS = get_gemini_models()
 
 
 # ============================================================
@@ -124,246 +61,402 @@ GEMINI_MODELS = get_gemini_models()
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
+    format=(
+        "%(asctime)s | "
+        "%(levelname)s | "
+        "%(message)s"
+    ),
 )
 
-logger = logging.getLogger("shayari-automation")
+logger = logging.getLogger(
+    "shayari-automation"
+)
 
 
 # ============================================================
-# HELPERS
+# IMPORT GENERATOR MODULE
 # ============================================================
 
-def utc_now():
-    return datetime.now(
-        timezone.utc
-    ).isoformat()
+import src.shayari_generator as shayari_generator
+
+from src.shayari_video import (
+    create_video,
+)
+
+from src.uploader import (
+    upload_short_to_youtube,
+)
 
 
-def validate_roman_hindi(text):
-    """
-    Prevent accidental Devanagari/Urdu script.
+# ============================================================
+# CONFIG
+# ============================================================
 
-    Shayari must remain Roman Hindi / Hinglish.
-    """
-
-    if not text:
-        return False
-
-    # Devanagari Unicode range
-    for char in text:
-
-        code = ord(char)
-
-        if 0x0900 <= code <= 0x097F:
-            return False
-
-    # Arabic / Urdu range
-    for char in text:
-
-        code = ord(char)
-
-        if 0x0600 <= code <= 0x06FF:
-            return False
-
-    return True
-
-
-def safe_filename(text):
-    """
-    Convert title into a safe filename.
-    """
-
-    allowed = (
-        "abcdefghijklmnopqrstuvwxyz"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "0123456789"
-        "_- "
+VIDEO_DURATION = int(
+    os.getenv(
+        "SHAYARI_DURATION",
+        "15",
     )
+)
 
-    cleaned = "".join(
-        c if c in allowed else "_"
-        for c in text
+YOUTUBE_UPLOAD = (
+    os.getenv(
+        "YOUTUBE_UPLOAD",
+        "true",
+    ).lower()
+    == "true"
+)
+
+PIPELINE_RETRIES = int(
+    os.getenv(
+        "PIPELINE_RETRIES",
+        "3",
     )
+)
 
-    cleaned = "_".join(
-        cleaned.split()
+RETRY_DELAY = int(
+    os.getenv(
+        "RETRY_DELAY",
+        "15",
     )
-
-    return cleaned[:80] or "shayari_short"
+)
 
 
 # ============================================================
-# GEMINI MODEL CONFIG
+# GEMINI MODELS
 # ============================================================
 
-def set_model_environment(model):
-    """
-    Tell shayari_generator which Gemini model to use.
+def get_gemini_models() -> list[str]:
 
-    The generator reads GEMINI_MODEL.
-    """
+    raw = os.getenv(
+        "GEMINI_MODELS",
+        "",
+    ).strip()
 
-    os.environ["GEMINI_MODEL"] = model
+    if raw:
 
-    logger.info(
-        "🔄 Gemini model selected: %s",
+        models = [
+            item.strip()
+            for item in raw.split(",")
+            if item.strip()
+        ]
+
+    else:
+
+        models = [
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+        ]
+
+    # Remove duplicates while
+    # preserving order.
+    unique = []
+
+    for model in models:
+
+        if model not in unique:
+            unique.append(model)
+
+    return unique
+
+
+GEMINI_MODELS = (
+    get_gemini_models()
+)
+
+
+# ============================================================
+# SWITCH MODEL
+# ============================================================
+
+def switch_gemini_model(
+    model: str,
+) -> None:
+
+    os.environ[
+        "GEMINI_MODEL"
+    ] = model
+
+    shayari_generator.MODEL = (
         model
     )
 
+    logger.info(
+        f"Gemini model selected: {model}"
+    )
+
 
 # ============================================================
-# GENERATE SHAYARI
+# QUOTA ERROR
 # ============================================================
 
-def generate_content_with_model_swapping():
-    """
-    Try Gemini models one by one.
+def is_quota_error(
+    exc: Exception,
+) -> bool:
 
-    Model 1 fails
-        ↓
-    Model 2
-        ↓
-    Model 3
-        ↓
-    fallback inside generator
-    """
+    text = str(
+        exc
+    ).lower()
+
+    indicators = [
+        "429",
+        "resource_exhausted",
+        "quota",
+        "rate limit",
+        "too many requests",
+        "generaterequestsperday",
+    ]
+
+    return any(
+        indicator in text
+        for indicator in indicators
+    )
+
+
+# ============================================================
+# GENERATE CONTENT
+# ============================================================
+
+def generate_content() -> dict:
+
+    logger.info(
+        "Starting Shayari content generation..."
+    )
 
     last_error = None
 
-    for index, model in enumerate(
-        GEMINI_MODELS,
-        start=1
-    ):
+    for model in GEMINI_MODELS:
 
-        logger.info(
-            "🤖 Gemini model %d/%d: %s",
-            index,
-            len(GEMINI_MODELS),
+        switch_gemini_model(
             model
         )
 
-        set_model_environment(model)
-
         try:
 
-            content = generate_shayari()
+            result = (
+                shayari_generator
+                .generate_shayari()
+            )
 
-            if not content:
+            if not result:
                 raise RuntimeError(
-                    "Gemini returned empty content."
-                )
-
-            if not isinstance(content, dict):
-                raise RuntimeError(
-                    "Gemini response is not a dictionary."
+                    "Generator returned empty result."
                 )
 
             shayari = str(
-                content.get("shayari", "")
+                result.get(
+                    "shayari",
+                    "",
+                )
+            ).strip()
+
+            title = str(
+                result.get(
+                    "title",
+                    "",
+                )
+            ).strip()
+
+            description = str(
+                result.get(
+                    "description",
+                    "",
+                )
             ).strip()
 
             if not shayari:
+
                 raise RuntimeError(
                     "Generated Shayari is empty."
                 )
 
-            if not validate_roman_hindi(shayari):
+            if not title:
+
                 raise RuntimeError(
-                    "Generated text contains "
-                    "Devanagari/Urdu characters."
+                    "Generated title is empty."
                 )
 
+            if not description:
+
+                raise RuntimeError(
+                    "Generated description is empty."
+                )
+
+            # Final Roman-Hindi safety check.
+            if re.search(
+                r"[\u0900-\u097F]",
+                shayari,
+            ):
+
+                raise RuntimeError(
+                    "Generated Shayari contains Devanagari."
+                )
+
+            result[
+                "_gemini_model"
+            ] = model
+
             logger.info(
-                "✅ Shayari generated successfully "
-                "using %s",
-                model
+                "Content generation successful."
             )
 
-            content["_gemini_model"] = model
-
-            return content
+            return result
 
         except Exception as exc:
 
             last_error = exc
 
-            error_text = str(exc)
-
-            logger.warning(
-                "⚠️ Model %s failed: %s",
-                model,
-                error_text
+            logger.error(
+                f"Model {model} failed: {exc}"
             )
 
-            quota_error = (
-                "429" in error_text
-                or "RESOURCE_EXHAUSTED"
-                in error_text
-                or "quota"
-                in error_text.lower()
-                or "rate limit"
-                in error_text.lower()
-            )
-
-            if quota_error:
+            if is_quota_error(
+                exc
+            ):
 
                 logger.warning(
-                    "🚫 Quota/rate limit detected "
-                    "for %s.",
-                    model
+                    f"Quota/rate limit on {model}. "
+                    "Trying next model..."
                 )
 
-            if index < len(GEMINI_MODELS):
+                continue
 
-                logger.info(
-                    "➡️ Switching Gemini model: "
-                    "%s → %s",
-                    model,
-                    GEMINI_MODELS[index]
-                )
-
-                time.sleep(2)
+            # Other errors:
+            # try next configured model too.
+            continue
 
     # ========================================================
-    # ALL MODELS FAILED
+    # ALL GEMINI MODELS FAILED
     # ========================================================
 
-    logger.error(
-        "❌ All Gemini models failed."
+    logger.warning(
+        "All configured Gemini models failed."
     )
+
+    logger.warning(
+        "Using local fallback content."
+    )
+
+    result = (
+        shayari_generator
+        .local_fallback(
+            shayari_generator.load_history()
+        )
+    )
+
+    result[
+        "_gemini_model"
+    ] = "local_fallback"
 
     if last_error:
-        logger.error(
-            "Last Gemini error: %s",
-            last_error
-        )
+
+        result[
+            "_last_gemini_error"
+        ] = str(last_error)
+
+    return result
+
+
+# ============================================================
+# SAFE FILENAME
+# ============================================================
+
+def safe_filename(
+    text: str,
+) -> str:
+
+    text = str(
+        text or "shayari"
+    )
+
+    text = re.sub(
+        r"[^A-Za-z0-9_-]+",
+        "_",
+        text,
+    )
+
+    text = re.sub(
+        r"_+",
+        "_",
+        text,
+    )
+
+    return text.strip(
+        "_"
+    )[:70] or "shayari"
+
+
+# ============================================================
+# SAVE JSON
+# ============================================================
+
+def save_json(
+    data: dict,
+    path: Path,
+) -> None:
+
+    path.write_text(
+        json.dumps(
+            data,
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+# ============================================================
+# GENERATE VIDEO
+# ============================================================
+
+def generate_video_file(
+    content: dict,
+) -> Path:
+
+    title = content[
+        "title"
+    ]
+
+    filename = (
+        safe_filename(title)
+        + "_short.mp4"
+    )
+
+    output_path = (
+        OUTPUT_DIR
+        / filename
+    )
 
     logger.info(
-        "🛟 Asking generator for fallback Shayari..."
+        f"Generating video: {output_path}"
     )
 
-    # Final fallback call.
-    #
-    # The generator itself contains a local
-    # original Shayari fallback pool.
-    #
-    set_model_environment(
-        GEMINI_MODELS[-1]
+    # IMPORTANT:
+    # Positional arguments intentionally used.
+    # This keeps compatibility with the existing
+    # create_video(text, output_path, duration)
+    # function.
+    result = create_video(
+        content[
+            "shayari"
+        ],
+        str(output_path),
+        VIDEO_DURATION,
     )
 
-    fallback_content = generate_shayari()
+    result_path = Path(
+        result
+    )
 
-    if not fallback_content:
+    if not result_path.exists():
+
         raise RuntimeError(
-            "Gemini and local fallback both failed."
+            "Video generator reported success "
+            "but output file does not exist."
         )
 
-    fallback_content[
-        "_gemini_model"
-    ] = "LOCAL_FALLBACK"
-
-    return fallback_content
+    return result_path
 
 
 # ============================================================
@@ -371,311 +464,252 @@ def generate_content_with_model_swapping():
 # ============================================================
 
 def save_metadata(
-    content,
-    video_path
-):
-
-    metadata = {
-        "created_at": utc_now(),
-
-        "title": content.get(
-            "title",
-            "Dard Bhari Shayari 💔"
-        ),
-
-        "description": content.get(
-            "description",
-            ""
-        ),
-
-        "hashtags": content.get(
-            "hashtags",
-            []
-        ),
-
-        "tags": content.get(
-            "tags",
-            []
-        ),
-
-        "shayari": content.get(
-            "shayari",
-            ""
-        ),
-
-        "video": str(
-            video_path
-        ),
-
-        "gemini_model": content.get(
-            "_gemini_model",
-            "unknown"
-        ),
-    }
+    content: dict,
+    video_path: Path,
+) -> Path:
 
     metadata_path = (
-        Path(video_path)
-        .with_suffix(".json")
+        video_path.with_suffix(
+            ".json"
+        )
     )
 
-    with open(
-        metadata_path,
-        "w",
-        encoding="utf-8"
-    ) as file:
+    metadata = {
+        "created_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
 
-        json.dump(
-            metadata,
-            file,
-            ensure_ascii=False,
-            indent=2,
-        )
+        "video": {
+            "filename": video_path.name,
+            "duration": VIDEO_DURATION,
+            "width": 1080,
+            "height": 1920,
+            "aspect_ratio": "9:16",
+        },
+
+        "content": {
+            "shayari": content.get(
+                "shayari",
+                "",
+            ),
+
+            "title": content.get(
+                "title",
+                "",
+            ),
+
+            "description": content.get(
+                "description",
+                "",
+            ),
+
+            "queries": content.get(
+                "queries",
+                [],
+            ),
+
+            "hashtags": content.get(
+                "hashtags",
+                [],
+            ),
+
+            "tags": content.get(
+                "tags",
+                [],
+            ),
+        },
+
+        "generation": {
+            "source": content.get(
+                "_source",
+                "",
+            ),
+
+            "gemini_model": content.get(
+                "_gemini_model",
+                content.get(
+                    "_model",
+                    "",
+                ),
+            ),
+        },
+
+        "youtube": {
+            "upload_enabled": YOUTUBE_UPLOAD,
+            "privacy_status": "unlisted",
+        },
+    }
+
+    save_json(
+        metadata,
+        metadata_path,
+    )
 
     logger.info(
-        "📝 Metadata saved: %s",
-        metadata_path
+        f"Metadata saved: {metadata_path}"
     )
 
     return metadata_path
 
 
 # ============================================================
-# SAVE HISTORY SAFELY
+# SAVE HISTORY
 # ============================================================
 
-def update_history(content):
+def save_content_history(
+    content: dict,
+    video_path: Path,
+) -> None:
 
-    try:
+    history_item = {
+        "timestamp": datetime.now(
+            timezone.utc
+        ).isoformat(),
 
-        save_history(
-            content
-        )
+        "video": video_path.name,
 
-        logger.info(
-            "📚 Content history updated."
-        )
+        "shayari": content.get(
+            "shayari",
+            "",
+        ),
 
-    except TypeError:
+        "title": content.get(
+            "title",
+            "",
+        ),
 
-        # Compatibility with generators
-        # expecting different signatures.
+        "description": content.get(
+            "description",
+            "",
+        ),
 
-        try:
+        "queries": content.get(
+            "queries",
+            [],
+        ),
 
-            history = []
+        "hashtags": content.get(
+            "hashtags",
+            [],
+        ),
 
-            if HISTORY_FILE.exists():
+        "tags": content.get(
+            "tags",
+            [],
+        ),
 
-                with open(
-                    HISTORY_FILE,
-                    "r",
-                    encoding="utf-8"
-                ) as file:
+        "source": content.get(
+            "_source",
+            "",
+        ),
 
-                    data = json.load(file)
+        "gemini_model": content.get(
+            "_gemini_model",
+            content.get(
+                "_model",
+                "",
+            ),
+        ),
+    }
 
-                    if isinstance(
-                        data,
-                        list
-                    ):
-                        history = data
+    # The generator already handles
+    # history. Do not duplicate the same
+    # content there.
+    #
+    # We only record if the generator's
+    # history doesn't already contain it.
 
-            history.append(
-                {
-                    "created_at": utc_now(),
-                    "title": content.get(
-                        "title",
-                        ""
-                    ),
-                    "shayari": content.get(
-                        "shayari",
-                        ""
-                    ),
-                }
+    history = (
+        shayari_generator
+        .load_history()
+    )
+
+    current_shayari = (
+        content.get(
+            "shayari",
+            "",
+        ).strip()
+    )
+
+    already_exists = any(
+        str(
+            item.get(
+                "shayari",
+                "",
             )
+        ).strip()
+        == current_shayari
+        for item in history
+    )
 
-            history = history[-100:]
+    if not already_exists:
 
-            with open(
-                HISTORY_FILE,
-                "w",
-                encoding="utf-8"
-            ) as file:
-
-                json.dump(
-                    history,
-                    file,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-
-            logger.info(
-                "📚 History saved using "
-                "compatibility mode."
-            )
-
-        except Exception as exc:
-
-            logger.warning(
-                "⚠️ Could not save history: %s",
-                exc
-            )
-
-    except Exception as exc:
-
-        logger.warning(
-            "⚠️ History update failed: %s",
-            exc
+        shayari_generator.save_history(
+            history_item
         )
-
-
-# ============================================================
-# CREATE VIDEO
-# ============================================================
-
-def generate_video_file(
-    content,
-    attempt
-):
-
-    title = content.get(
-        "title",
-        "Dard Bhari Shayari"
-    )
-
-    filename = (
-        f"{safe_filename(title)}"
-        f"_{int(time.time())}"
-        f"_{attempt}.mp4"
-    )
-
-    output_path = (
-        OUTPUT_DIR / filename
-    )
-
-    logger.info(
-        "🎬 Creating video..."
-    )
-
-    logger.info(
-        "📐 Target: 1080x1920"
-    )
-
-    logger.info(
-        "⏱️ Duration: %s seconds",
-        VIDEO_DURATION
-    )
-
-    # IMPORTANT:
-    #
-    # Positional arguments are intentional.
-    #
-    # This avoids:
-    #
-    # create_video() got an unexpected
-    # keyword argument 'shayari'
-    #
-    result = create_video(
-        content["shayari"],
-        str(output_path),
-        VIDEO_DURATION,
-    )
-
-    # Some implementations return
-    # the output path.
-    #
-    # Others return None after creating it.
-
-    if result:
-
-        result_path = Path(
-            str(result)
-        )
-
-        if result_path.exists():
-
-            output_path = result_path
-
-    if not output_path.exists():
-
-        raise RuntimeError(
-            "Video generation returned successfully "
-            "but output MP4 was not found."
-        )
-
-    size_mb = (
-        output_path.stat().st_size
-        / (1024 * 1024)
-    )
-
-    if size_mb < 0.1:
-
-        raise RuntimeError(
-            "Generated video is suspiciously small."
-        )
-
-    logger.info(
-        "✅ Video created: %s",
-        output_path
-    )
-
-    logger.info(
-        "📦 Video size: %.2f MB",
-        size_mb
-    )
-
-    return output_path
 
 
 # ============================================================
 # YOUTUBE UPLOAD
 # ============================================================
 
-def upload_video(
-    content,
-    video_path
-):
+def upload_to_youtube(
+    content: dict,
+    video_path: Path,
+) -> dict | None:
 
     if not YOUTUBE_UPLOAD:
 
         logger.info(
-            "⏭️ YouTube upload disabled."
+            "YOUTUBE_UPLOAD=false. "
+            "Skipping upload."
         )
 
         return None
 
     title = content.get(
         "title",
-        "Dard Bhari Shayari 💔"
+        "Heart Touching Shayari",
     )
 
     description = content.get(
         "description",
-        ""
+        "",
     )
 
     tags = content.get(
         "tags",
-        []
+        [],
     )
+
+    # --------------------------------------------------------
+    # FINAL SAFETY:
+    # Never allow this pipeline to publish public.
+    # --------------------------------------------------------
 
     logger.info(
-        "📤 Uploading to YouTube..."
+        "YouTube privacy: UNLISTED"
     )
 
-    logger.info(
-        "🔒 Privacy: UNLISTED"
-    )
+    try:
 
-    result = upload_short_to_youtube(
-        video_path=str(
-            video_path
-        ),
-        title=title,
-        description=description,
-        tags=tags,
-        thumbnail_path=None,
-    )
+        result = upload_short_to_youtube(
+            str(video_path),
+            title,
+            description,
+            tags=tags,
+        )
+
+    except TypeError:
+
+        # Compatibility fallback if uploader
+        # has an older function signature.
+        result = upload_short_to_youtube(
+            str(video_path),
+            title,
+            description,
+            tags,
+        )
 
     if not result:
 
@@ -686,299 +720,238 @@ def upload_video(
     privacy = str(
         result.get(
             "privacy_status",
-            ""
+            result.get(
+                "privacyStatus",
+                "",
+            ),
         )
     ).lower()
 
+    # If uploader provides privacy status,
+    # verify it.
     if privacy and privacy != "unlisted":
 
         raise RuntimeError(
-            "SAFETY CHECK FAILED: "
-            f"YouTube privacy is '{privacy}', "
-            "not 'unlisted'."
+            "SAFETY STOP: YouTube upload did not "
+            f"return unlisted status. Got: {privacy}"
         )
 
     logger.info(
-        "✅ YouTube upload successful."
+        "YouTube upload completed."
     )
-
-    logger.info(
-        "🔒 Uploaded as UNLISTED."
-    )
-
-    if result.get("video_id"):
-
-        logger.info(
-            "🆔 Video ID: %s",
-            result["video_id"]
-        )
-
-    if result.get("shorts_url"):
-
-        logger.info(
-            "🔗 Shorts URL: %s",
-            result["shorts_url"]
-        )
 
     return result
 
 
 # ============================================================
-# COMPLETE PIPELINE
+# ONE COMPLETE PIPELINE
 # ============================================================
 
-def run_pipeline():
+def run_pipeline() -> dict:
 
+    logger.info("")
     logger.info(
-        "=" * 60
+        "=" * 70
+    )
+    logger.info(
+        "HINGLISH SHAYARI SHORTS AUTOMATION"
+    )
+    logger.info(
+        "=" * 70
     )
 
     logger.info(
-        "🚀 HINGLISH SHAYARI AUTOMATION STARTED"
+        f"Duration: {VIDEO_DURATION}s"
     )
 
     logger.info(
-        "=" * 60
+        "Resolution: 1080x1920"
     )
 
     logger.info(
-        "🤖 Gemini model priority:"
+        "Aspect ratio: 9:16"
     )
 
-    for number, model in enumerate(
-        GEMINI_MODELS,
-        start=1
+    logger.info(
+        "TTS: DISABLED"
+    )
+
+    logger.info(
+        "Text animation: DISABLED"
+    )
+
+    logger.info(
+        "Extra card/UI: DISABLED"
+    )
+
+    logger.info(
+        f"YouTube upload: {YOUTUBE_UPLOAD}"
+    )
+
+    logger.info(
+        "YouTube privacy: UNLISTED"
+    )
+
+    # --------------------------------------------------------
+    # 1. CONTENT
+    # --------------------------------------------------------
+
+    content = generate_content()
+
+    logger.info("")
+    logger.info(
+        "GENERATED SHAYARI:"
+    )
+    logger.info(
+        content["shayari"]
+    )
+
+    logger.info("")
+    logger.info(
+        f"TITLE: {content['title']}"
+    )
+
+    logger.info("")
+    logger.info(
+        "QUERIES:"
+    )
+
+    for query in content.get(
+        "queries",
+        [],
     ):
 
         logger.info(
-            "   %d. %s",
-            number,
-            model
+            f"  - {query}"
         )
 
+    logger.info("")
     logger.info(
-        "🎥 Duration: %ss",
-        VIDEO_DURATION
+        "HASHTAGS:"
     )
 
     logger.info(
-        "📤 YouTube upload: %s",
-        YOUTUBE_UPLOAD
+        " ".join(
+            content.get(
+                "hashtags",
+                [],
+            )
+        )
+    )
+
+    logger.info("")
+    logger.info(
+        "TAGS:"
     )
 
     logger.info(
-        "🔒 YouTube privacy: UNLISTED"
-    )
-
-    last_error = None
-
-    for attempt in range(
-        1,
-        PIPELINE_RETRIES + 1
-    ):
-
-        logger.info(
-            ""
+        ", ".join(
+            content.get(
+                "tags",
+                [],
+            )
         )
+    )
 
-        logger.info(
-            "🔁 PIPELINE ATTEMPT %d/%d",
-            attempt,
-            PIPELINE_RETRIES
+    # --------------------------------------------------------
+    # 2. VIDEO
+    # --------------------------------------------------------
+
+    video_path = (
+        generate_video_file(
+            content
         )
-
-        try:
-
-            # ------------------------------------------------
-            # 1. Generate Shayari
-            # ------------------------------------------------
-
-            content = (
-                generate_content_with_model_swapping()
-            )
-
-            logger.info(
-                "✍️ Shayari:"
-            )
-
-            logger.info(
-                "%s",
-                content["shayari"]
-            )
-
-            logger.info(
-                "🏷️ Title: %s",
-                content.get(
-                    "title",
-                    ""
-                )
-            )
-
-            logger.info(
-                "🤖 Model: %s",
-                content.get(
-                    "_gemini_model",
-                    "unknown"
-                )
-            )
-
-            # ------------------------------------------------
-            # 2. Validate Roman Hindi
-            # ------------------------------------------------
-
-            if not validate_roman_hindi(
-                content["shayari"]
-            ):
-
-                raise RuntimeError(
-                    "Shayari contains unsupported script."
-                )
-
-            # ------------------------------------------------
-            # 3. Create Video
-            # ------------------------------------------------
-
-            video_path = generate_video_file(
-                content,
-                attempt
-            )
-
-            # ------------------------------------------------
-            # 4. Save Metadata
-            # ------------------------------------------------
-
-            metadata_path = save_metadata(
-                content,
-                video_path
-            )
-
-            # ------------------------------------------------
-            # 5. Save History
-            # ------------------------------------------------
-
-            update_history(
-                content
-            )
-
-            # ------------------------------------------------
-            # 6. Upload YouTube
-            # ------------------------------------------------
-
-            upload_result = upload_video(
-                content,
-                video_path
-            )
-
-            # ------------------------------------------------
-            # SUCCESS
-            # ------------------------------------------------
-
-            logger.info(
-                ""
-            )
-
-            logger.info(
-                "=" * 60
-            )
-
-            logger.info(
-                "🎉 PIPELINE COMPLETED SUCCESSFULLY"
-            )
-
-            logger.info(
-                "=" * 60
-            )
-
-            logger.info(
-                "🎬 Video: %s",
-                video_path
-            )
-
-            logger.info(
-                "📝 Metadata: %s",
-                metadata_path
-            )
-
-            if upload_result:
-
-                logger.info(
-                    "📺 YouTube: %s",
-                    upload_result.get(
-                        "shorts_url",
-                        upload_result.get(
-                            "url",
-                            "uploaded"
-                        )
-                    )
-                )
-
-            return {
-                "success": True,
-                "video_path": str(
-                    video_path
-                ),
-                "metadata_path": str(
-                    metadata_path
-                ),
-                "upload": upload_result,
-            }
-
-        except Exception as exc:
-
-            last_error = exc
-
-            logger.exception(
-                "❌ Pipeline attempt %d failed.",
-                attempt
-            )
-
-            if attempt >= PIPELINE_RETRIES:
-
-                break
-
-            logger.info(
-                "⏳ Waiting %s seconds "
-                "before next pipeline attempt...",
-                RETRY_DELAY
-            )
-
-            time.sleep(
-                RETRY_DELAY
-            )
-
-    # ========================================================
-    # COMPLETE FAILURE
-    # ========================================================
-
-    logger.error(
-        ""
     )
 
-    logger.error(
-        "=" * 60
-    )
+    # --------------------------------------------------------
+    # 3. METADATA
+    # --------------------------------------------------------
 
-    logger.error(
-        "💥 PIPELINE FAILED"
-    )
-
-    logger.error(
-        "=" * 60
-    )
-
-    if last_error:
-
-        logger.error(
-            "Last error: %s",
-            last_error
+    metadata_path = (
+        save_metadata(
+            content,
+            video_path,
         )
+    )
 
-    return {
-        "success": False,
-        "error": str(
-            last_error
-        ) if last_error else "Unknown error",
+    # --------------------------------------------------------
+    # 4. HISTORY
+    # --------------------------------------------------------
+
+    save_content_history(
+        content,
+        video_path,
+    )
+
+    # --------------------------------------------------------
+    # 5. YOUTUBE
+    # --------------------------------------------------------
+
+    upload_result = (
+        upload_to_youtube(
+            content,
+            video_path,
+        )
+    )
+
+    # --------------------------------------------------------
+    # 6. RESULT
+    # --------------------------------------------------------
+
+    result = {
+        "success": True,
+
+        "video": str(
+            video_path
+        ),
+
+        "metadata": str(
+            metadata_path
+        ),
+
+        "title": content[
+            "title"
+        ],
+
+        "shayari": content[
+            "shayari"
+        ],
+
+        "queries": content.get(
+            "queries",
+            [],
+        ),
+
+        "hashtags": content.get(
+            "hashtags",
+            [],
+        ),
+
+        "tags": content.get(
+            "tags",
+            [],
+        ),
+
+        "gemini_model": content.get(
+            "_gemini_model",
+            "",
+        ),
+
+        "youtube": upload_result,
     }
+
+    logger.info("")
+    logger.info(
+        "=" * 70
+    )
+    logger.info(
+        "PIPELINE COMPLETED SUCCESSFULLY"
+    )
+    logger.info(
+        "=" * 70
+    )
+
+    return result
 
 
 # ============================================================
@@ -987,32 +960,97 @@ def run_pipeline():
 
 def main():
 
-    try:
+    last_error = None
 
-        result = run_pipeline()
+    for attempt in range(
+        1,
+        PIPELINE_RETRIES + 1,
+    ):
 
-        if result.get("success"):
+        logger.info(
+            f"Pipeline attempt "
+            f"{attempt}/{PIPELINE_RETRIES}"
+        )
+
+        try:
+
+            result = run_pipeline()
+
+            result_path = (
+                OUTPUT_DIR
+                / "latest_result.json"
+            )
+
+            save_json(
+                result,
+                result_path,
+            )
+
+            print("")
+            print(
+                json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
 
             return 0
 
-        return 1
+        except Exception as exc:
 
-    except KeyboardInterrupt:
+            last_error = exc
 
-        logger.warning(
-            "🛑 Process interrupted by user."
+            logger.exception(
+                "Pipeline failed."
+            )
+
+            if attempt >= PIPELINE_RETRIES:
+
+                break
+
+            delay = (
+                RETRY_DELAY
+                * attempt
+            )
+
+            delay += random.uniform(
+                1,
+                5,
+            )
+
+            logger.info(
+                f"Retrying entire pipeline "
+                f"in {delay:.1f}s..."
+            )
+
+            time.sleep(
+                delay
+            )
+
+    logger.error(
+        ""
+    )
+
+    logger.error(
+        "=" * 70
+    )
+
+    logger.error(
+        "PIPELINE FAILED"
+    )
+
+    logger.error(
+        "=" * 70
+    )
+
+    if last_error:
+
+        logger.error(
+            str(last_error)
         )
 
-        return 130
-
-    except Exception as exc:
-
-        logger.exception(
-            "💥 Fatal error: %s",
-            exc
-        )
-
-        return 1
+    return 1
 
 
 # ============================================================
