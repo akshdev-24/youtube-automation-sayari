@@ -1,34 +1,7 @@
-# ============================================================
-# HINGLISH SHAYARI SHORTS AUTOMATION
-# ============================================================
-#
-# Schedule:
-#   09:00 IST
-#   14:00 IST
-#
-# YouTube:
-#   ALWAYS UNLISTED
-#
-# Manual:
-#   workflow_dispatch
-#
-# ============================================================
-
 name: Hinglish Shayari Shorts Automation
 
-
-# ============================================================
-# TRIGGERS
-# ============================================================
-
 on:
-
-  # ----------------------------------------------------------
-  # Automatic schedule
-  # ----------------------------------------------------------
-
   schedule:
-
     # 09:00 AM IST
     - cron: "0 9 * * *"
       timezone: "Asia/Kolkata"
@@ -37,119 +10,79 @@ on:
     - cron: "0 14 * * *"
       timezone: "Asia/Kolkata"
 
-
-  # ----------------------------------------------------------
-  # Manual run
-  # ----------------------------------------------------------
-
+  # IMPORTANT:
+  # This enables the "Run workflow" button in GitHub Actions.
   workflow_dispatch:
-
-
-# ============================================================
-# PERMISSIONS
-# ============================================================
 
 permissions:
   contents: write
 
-
-# ============================================================
-# JOB
-# ============================================================
+concurrency:
+  group: shayari-automation
+  cancel-in-progress: false
 
 jobs:
-
   generate-and-upload:
-
-    name: Generate Shayari Short
-
+    name: Generate & Upload Shayari Short
     runs-on: ubuntu-latest
-
-
-    # --------------------------------------------------------
-    # Prevent one failed/stuck run from running forever
-    # --------------------------------------------------------
-
-    timeout-minutes: 30
-
+    timeout-minutes: 15
 
     steps:
 
-
-      # ======================================================
-      # 1. CHECKOUT REPOSITORY
-      # ======================================================
-
+      # =========================================================
+      # 1. CHECKOUT
+      # =========================================================
       - name: Checkout repository
-
         uses: actions/checkout@v7
-
         with:
           fetch-depth: 0
 
-
-      # ======================================================
-      # 2. SETUP PYTHON
-      # ======================================================
-
-      # Python 3.11 is intentionally used because the project
-      # contains older MoviePy/Pillow versions that are safer
-      # on Python 3.11 than 3.13+.
-
-      - name: Setup Python 3.11
-
+      # =========================================================
+      # 2. PYTHON
+      # =========================================================
+      - name: Setup Python
         uses: actions/setup-python@v7
-
         with:
           python-version: "3.11"
           cache: "pip"
 
-
-      # ======================================================
-      # 3. INSTALL SYSTEM DEPENDENCIES
-      # ======================================================
-
+      # =========================================================
+      # 3. SYSTEM DEPENDENCIES
+      # =========================================================
       - name: Install FFmpeg and fonts
-
         run: |
-
           sudo apt-get update
 
           sudo apt-get install -y \
             ffmpeg \
             fontconfig \
             fonts-dejavu \
-            fonts-liberation
+            fonts-liberation \
+            fonts-freefont-ttf
 
+          echo "FFmpeg version:"
+          ffmpeg -version | head -n 1
 
-      # ======================================================
-      # 4. VERIFY FFmpeg
-      # ======================================================
+          echo ""
+          echo "Available serif fonts:"
+          fc-list | grep -Ei "Times|Liberation Serif|DejaVu Serif" | head -20 || true
 
-      - name: Verify FFmpeg
-
-        run: |
-
-          ffmpeg -version
-
-          ffprobe -version
-
-
-      # ======================================================
-      # 5. VERIFY PROJECT FILES
-      # ======================================================
-
+      # =========================================================
+      # 4. VERIFY PROJECT STRUCTURE
+      # =========================================================
       - name: Verify project structure
-
+        shell: bash
         run: |
+          set -e
 
-          echo "Checking project..."
+          echo "Checking project files..."
 
           test -f main.py
           test -f requirements.txt
 
           test -f src/shayari_generator.py
           test -f src/shayari_video.py
+          test -f src/seo_engine.py
           test -f src/uploader.py
 
           test -d assets
@@ -157,200 +90,17 @@ jobs:
 
           echo "Project structure OK."
 
-
-      # ======================================================
-      # 6. INSTALL PYTHON DEPENDENCIES
-      # ======================================================
-
-      - name: Install Python dependencies
-
+      # =========================================================
+      # 5. VERIFY BACKGROUND ASSET
+      # =========================================================
+      - name: Verify background asset
+        shell: bash
         run: |
+          set -e
 
-          python -m pip install --upgrade pip setuptools wheel
+          echo "Searching for background..."
 
-          pip install -r requirements.txt
-
-
-      # ======================================================
-      # 7. CREATE OUTPUT DIRECTORY
-      # ======================================================
-
-      - name: Prepare output directory
-
-        run: |
-
-          mkdir -p output
-
-          echo "Output directory ready."
-
-
-      # ======================================================
-      # 8. RESTORE GOOGLE OAUTH CLIENT SECRET
-      # ======================================================
-      #
-      # GitHub Secret required:
-      #
-      # CLIENT_SECRET_B64
-      #
-      # This should contain base64 encoded client_secrets.json
-      #
-      # DO NOT commit client_secrets.json to GitHub.
-      #
-      # ======================================================
-
-      - name: Restore YouTube client secret
-
-        env:
-          CLIENT_SECRET_B64: ${{ secrets.CLIENT_SECRET_B64 }}
-
-        run: |
-
-          if [ -z "$CLIENT_SECRET_B64" ]; then
-            echo "ERROR: CLIENT_SECRET_B64 secret is missing."
-            exit 1
-          fi
-
-          printf '%s' "$CLIENT_SECRET_B64" \
-            | base64 --decode \
-            > client_secrets.json
-
-          test -s client_secrets.json
-
-          echo "YouTube client secret restored."
-
-
-      # ======================================================
-      # 9. RESTORE GOOGLE OAUTH CREDENTIALS
-      # ======================================================
-      #
-      # GitHub Secret required:
-      #
-      # CREDENTIALS_B64
-      #
-      # This should contain the authorized credentials.json
-      # generated after YouTube OAuth.
-      #
-      # ======================================================
-
-      - name: Restore YouTube OAuth credentials
-
-        env:
-          CREDENTIALS_B64: ${{ secrets.CREDENTIALS_B64 }}
-
-        run: |
-
-          if [ -z "$CREDENTIALS_B64" ]; then
-            echo "ERROR: CREDENTIALS_B64 secret is missing."
-            exit 1
-          fi
-
-          printf '%s' "$CREDENTIALS_B64" \
-            | base64 --decode \
-            > credentials.json
-
-          test -s credentials.json
-
-          echo "YouTube OAuth credentials restored."
-
-
-      # ======================================================
-      # 10. VALIDATE GOOGLE FILES
-      # ======================================================
-
-      - name: Validate Google credentials files
-
-        run: |
-
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          for filename in [
-              "client_secrets.json",
-              "credentials.json",
-          ]:
-
-              path = Path(filename)
-
-              if not path.exists():
-                  raise SystemExit(
-                      f"Missing {filename}"
-                  )
-
-              try:
-                  data = json.loads(
-                      path.read_text(
-                          encoding="utf-8"
-                      )
-                  )
-              except Exception as exc:
-                  raise SystemExit(
-                      f"Invalid JSON in {filename}: {exc}"
-                  )
-
-              if not isinstance(data, dict):
-                  raise SystemExit(
-                      f"{filename} is not a JSON object."
-                  )
-
-              print(
-                  f"{filename}: valid JSON"
-              )
-          PY
-
-
-      # ======================================================
-      # 11. CHECK BACKGROUND ASSETS
-      # ======================================================
-
-      - name: Check background assets
-
-        run: |
-
-          echo "Available assets:"
-
-          find assets \
-            -maxdepth 2 \
-            -type f \
-            -print
-
-
-      # ======================================================
-      # 12. CHECK MUSIC
-      # ======================================================
-
-      - name: Check music assets
-
-        run: |
-
-          MUSIC_COUNT=$(find assets/music \
-            -type f \
-            \( \
-              -iname "*.mp3" \
-              -o -iname "*.wav" \
-              -o -iname "*.m4a" \
-              -o -iname "*.aac" \
-            \) | wc -l)
-
-          echo "Music files found: $MUSIC_COUNT"
-
-          if [ "$MUSIC_COUNT" -eq 0 ]; then
-            echo "ERROR: No music found in assets/music/"
-            exit 1
-          fi
-
-
-      # ======================================================
-      # 13. CHECK BACKGROUND IMAGE / VIDEO
-      # ======================================================
-
-      - name: Check visual background assets
-
-        run: |
-
-          BACKGROUND_COUNT=$(find assets \
-            -maxdepth 1 \
-            -type f \
+          if find assets -maxdepth 2 -type f \
             \( \
               -iname "*.jpg" \
               -o -iname "*.jpeg" \
@@ -359,322 +109,392 @@ jobs:
               -o -iname "*.mp4" \
               -o -iname "*.mov" \
               -o -iname "*.webm" \
-            \) | wc -l)
+            \) | grep -q .; then
 
-          echo "Background files found: $BACKGROUND_COUNT"
+            echo "Background asset found:"
+            find assets -maxdepth 2 -type f \
+              \( \
+                -iname "*.jpg" \
+                -o -iname "*.jpeg" \
+                -o -iname "*.png" \
+                -o -iname "*.webp" \
+                -o -iname "*.mp4" \
+                -o -iname "*.mov" \
+                -o -iname "*.webm" \
+              \)
 
-          if [ "$BACKGROUND_COUNT" -eq 0 ]; then
-            echo "ERROR: No background image/video found."
+          else
+            echo "ERROR: No background image/video found in assets/"
             exit 1
           fi
 
-
-      # ======================================================
-      # 14. SHOW CONFIGURATION
-      # ======================================================
-
-      - name: Show automation configuration
-
+      # =========================================================
+      # 6. VERIFY MUSIC
+      # =========================================================
+      - name: Verify background music
+        shell: bash
         run: |
+          set -e
 
-          echo "=============================================="
-          echo "HINGLISH SHAYARI AUTOMATION"
-          echo "=============================================="
+          echo "Searching for music..."
 
-          echo "Python:"
-          python --version
+          if find assets/music -type f \
+            \( \
+              -iname "*.mp3" \
+              -o -iname "*.wav" \
+              -o -iname "*.m4a" \
+              -o -iname "*.aac" \
+              -o -iname "*.ogg" \
+            \) | grep -q .; then
 
-          echo ""
+            echo "Music found:"
+            find assets/music -type f \
+              \( \
+                -iname "*.mp3" \
+                -o -iname "*.wav" \
+                -o -iname "*.m4a" \
+                -o -iname "*.aac" \
+                -o -iname "*.ogg" \
+              \)
 
-          echo "FFmpeg:"
-          ffmpeg -version | head -n 1
+          else
+            echo "ERROR: No music file found in assets/music/"
+            exit 1
+          fi
 
-          echo ""
+      # =========================================================
+      # 7. VERIFY TIMES NEW ROMAN
+      # =========================================================
+      - name: Verify Times New Roman Regular font
+        shell: bash
+        run: |
+          set -e
 
-          echo "YouTube upload:"
-          echo "ENABLED"
+          echo "Checking project font..."
 
-          echo ""
+          if [ -f "assets/fonts/times.ttf" ]; then
+            echo "OK: assets/fonts/times.ttf found."
+          elif [ -f "assets/fonts/times_new_roman.ttf" ]; then
+            echo "OK: assets/fonts/times_new_roman.ttf found."
+          else
+            echo ""
+            echo "WARNING:"
+            echo "Exact Times New Roman Regular font was not found."
+            echo "The video generator will use its configured serif fallback."
+            echo ""
+            echo "For exact Times New Roman output, add:"
+            echo "assets/fonts/times.ttf"
+          fi
 
-          echo "YouTube privacy:"
-          echo "UNLISTED"
+      # =========================================================
+      # 8. INSTALL PYTHON DEPENDENCIES
+      # =========================================================
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-          echo ""
-
-          echo "Video:"
-          echo "1080x1920"
-          echo "9:16"
-          echo "Static Shayari"
-          echo "No TTS"
-
-          echo "=============================================="
-
-
-      # ======================================================
-      # 15. RUN AUTOMATION
-      # ======================================================
-
-      - name: Generate and upload Shayari Short
-
+      # =========================================================
+      # 9. RESTORE YOUTUBE OAUTH CLIENT
+      # =========================================================
+      - name: Restore YouTube OAuth client
+        shell: bash
         env:
-
-          # --------------------------------------------------
-          # Gemini
-          # --------------------------------------------------
-
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-
-          # --------------------------------------------------
-          # Generator
-          # --------------------------------------------------
-
-          GEMINI_MODEL: "gemini-3.6-flash"
-
-          # --------------------------------------------------
-          # Video
-          # --------------------------------------------------
-
-          SHAYARI_DURATION: "15"
-
-          # --------------------------------------------------
-          # YouTube
-          # --------------------------------------------------
-
-          YOUTUBE_UPLOAD: "true"
-
-          YOUTUBE_CATEGORY_ID: "22"
-
-          # --------------------------------------------------
-          # Retry
-          # --------------------------------------------------
-
-          PIPELINE_RETRIES: "3"
-
-          RETRY_DELAY: "15"
-
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
         run: |
+          set -e
 
+          if [ -z "$YOUTUBE_CLIENT_SECRET" ]; then
+            echo "ERROR: YOUTUBE_CLIENT_SECRET secret is missing."
+            exit 1
+          fi
+
+          printf '%s' "$YOUTUBE_CLIENT_SECRET" > client_secrets.json
+
+          python - <<'PY'
+          import json
+
+          with open("client_secrets.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if "installed" not in data and "web" not in data:
+              raise SystemExit(
+                  "ERROR: client_secrets.json does not contain "
+                  "'installed' or 'web' OAuth configuration."
+              )
+
+          print("YouTube OAuth client JSON is valid.")
+          PY
+
+      # =========================================================
+      # 10. CHECK GEMINI SECRET
+      # =========================================================
+      - name: Verify Gemini API key
+        shell: bash
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
           if [ -z "$GOOGLE_API_KEY" ]; then
             echo "ERROR: GOOGLE_API_KEY secret is missing."
             exit 1
           fi
 
+          echo "GOOGLE_API_KEY is configured."
+
+      # =========================================================
+      # 11. CREATE REQUIRED DIRECTORIES
+      # =========================================================
+      - name: Prepare directories
+        run: |
+          mkdir -p output
+          mkdir -p logs
+
+      # =========================================================
+      # 12. RUN AUTOMATION
+      # =========================================================
+      - name: Generate Shayari Short
+        env:
+          # -----------------------------------------------------
+          # GEMINI
+          # -----------------------------------------------------
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+
+          GEMINI_MODELS: >-
+            gemini-3.6-flash,
+            gemini-3.7-flash,
+            gemini-3.8-flash
+
+          # -----------------------------------------------------
+          # VIDEO
+          # -----------------------------------------------------
+          # main.py itself forces 5/6/7 seconds.
+          # Do NOT set this to 15.
+          VIDEO_MIN_DURATION: "5"
+          VIDEO_MAX_DURATION: "7"
+
+          # -----------------------------------------------------
+          # YOUTUBE
+          # -----------------------------------------------------
+          YOUTUBE_UPLOAD: "true"
+
+          # Entertainment category
+          YOUTUBE_CATEGORY_ID: "24"
+
+          # NEVER publish automatically
+          YOUTUBE_PRIVACY_STATUS: "unlisted"
+
+          # -----------------------------------------------------
+          # RETRIES
+          # -----------------------------------------------------
+          PIPELINE_RETRIES: "3"
+          RETRY_DELAY: "15"
+
+          # -----------------------------------------------------
+          # PYTHON
+          # -----------------------------------------------------
+          PYTHONUNBUFFERED: "1"
+
+        run: |
+          set -e
+
+          echo "=============================================="
+          echo " HINGLISH SHAYARI SHORTS AUTOMATION"
+          echo "=============================================="
+          echo ""
+          echo "Video duration : 5-7 seconds"
+          echo "Resolution     : 1080x1920"
+          echo "Category       : Entertainment (24)"
+          echo "Privacy        : UNLISTED"
+          echo "Voice          : OFF"
+          echo "Text animation : OFF"
+          echo ""
+
           python main.py
 
-
-      # ======================================================
-      # 16. VERIFY OUTPUT
-      # ======================================================
-
+      # =========================================================
+      # 13. VERIFY OUTPUT
+      # =========================================================
       - name: Verify generated video
-
+        shell: bash
         run: |
+          set -e
 
-          echo "Generated files:"
+          echo "Looking for generated MP4..."
 
-          find output \
-            -maxdepth 1 \
-            -type f \
-            -print
-
-
-          VIDEO_COUNT=$(find output \
-            -maxdepth 1 \
-            -type f \
-            -iname "*.mp4" \
-            | wc -l)
-
+          VIDEO_COUNT=$(find output -type f -iname "*.mp4" | wc -l)
 
           if [ "$VIDEO_COUNT" -eq 0 ]; then
-
-            echo "ERROR:"
-            echo "No MP4 video was generated."
-
+            echo "ERROR: No MP4 video was generated."
             exit 1
-
           fi
 
+          echo "Generated videos:"
+          find output -type f -iname "*.mp4" -print
+
+          for VIDEO in output/*.mp4; do
+
+            if [ ! -f "$VIDEO" ]; then
+              continue
+            fi
+
+            echo ""
+            echo "Checking: $VIDEO"
+
+            WIDTH=$(ffprobe \
+              -v error \
+              -select_streams v:0 \
+              -show_entries stream=width \
+              -of csv=p=0 \
+              "$VIDEO")
+
+            HEIGHT=$(ffprobe \
+              -v error \
+              -select_streams v:0 \
+              -show_entries stream=height \
+              -of csv=p=0 \
+              "$VIDEO")
+
+            DURATION=$(ffprobe \
+              -v error \
+              -show_entries format=duration \
+              -of csv=p=0 \
+              "$VIDEO")
+
+            echo "Resolution: ${WIDTH}x${HEIGHT}"
+            echo "Duration: ${DURATION}s"
+
+            if [ "$WIDTH" != "1080" ]; then
+              echo "ERROR: Width must be 1080."
+              exit 1
+            fi
+
+            if [ "$HEIGHT" != "1920" ]; then
+              echo "ERROR: Height must be 1920."
+              exit 1
+            fi
+
+            python - "$DURATION" <<'PY'
+          import sys
+
+          duration = float(sys.argv[1])
+
+          if not 4.8 <= duration <= 7.2:
+              raise SystemExit(
+                  f"ERROR: Video duration {duration:.3f}s "
+                  "is outside the required 5-7 second range."
+              )
+
+          print(f"Duration OK: {duration:.3f}s")
+          PY
+
+          done
 
           echo ""
-          echo "Video count: $VIDEO_COUNT"
+          echo "Video verification successful."
 
-
-      # ======================================================
-      # 17. VERIFY VIDEO FORMAT
-      # ======================================================
-
-      - name: Verify video dimensions
-
+      # =========================================================
+      # 14. SHOW GENERATED METADATA
+      # =========================================================
+      - name: Show generated metadata
         shell: bash
-
         run: |
+          echo "Generated metadata files:"
 
-          VIDEO_FILE=$(find output \
-            -maxdepth 1 \
-            -type f \
-            -iname "*.mp4" \
-            | head -n 1)
+          find output -type f \
+            \( \
+              -iname "*.json" \
+              -o -iname "*.txt" \
+            \) \
+            -print || true
 
+          echo ""
 
-          echo "Checking:"
-          echo "$VIDEO_FILE"
+          for FILE in output/*.json; do
+            if [ -f "$FILE" ]; then
+              echo "=============================================="
+              echo "$FILE"
+              echo "=============================================="
+              cat "$FILE"
+              echo ""
+            fi
+          done
 
-
-          WIDTH=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=width \
-            -of csv=p=0 \
-            "$VIDEO_FILE")
-
-
-          HEIGHT=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=height \
-            -of csv=p=0 \
-            "$VIDEO_FILE")
-
-
-          echo "Width: $WIDTH"
-          echo "Height: $HEIGHT"
-
-
-          if [ "$WIDTH" != "1080" ]; then
-
-            echo "ERROR: Width is not 1080."
-
-            exit 1
-
-          fi
-
-
-          if [ "$HEIGHT" != "1920" ]; then
-
-            echo "ERROR: Height is not 1920."
-
-            exit 1
-
-          fi
-
-
-          echo "1080x1920 verification passed."
-
-
-      # ======================================================
-      # 18. UPLOAD GENERATED VIDEO AS ARTIFACT
-      # ======================================================
-      #
-      # Useful for downloading/viewing the generated result
-      # from GitHub Actions.
-      #
-      # Credentials are NOT included.
-      #
-      # ======================================================
-
-      - name: Upload generated output
-
+      # =========================================================
+      # 15. UPLOAD ARTIFACT
+      # =========================================================
+      - name: Upload generated video artifact
         if: always()
-
         uses: actions/upload-artifact@v7
-
         with:
-
           name: shayari-short-${{ github.run_number }}
-
           path: |
-            output/*.mp4
-            output/*.json
-
+            output/
+            logs/
           if-no-files-found: warn
-
           retention-days: 7
 
-
-      # ======================================================
-      # 19. UPDATE CONTENT HISTORY
-      # ======================================================
-
-      - name: Update content history
-
+      # =========================================================
+      # 16. COMMIT CONTENT HISTORY
+      # =========================================================
+      - name: Commit content history
         if: success()
-
+        shell: bash
         run: |
+          set -e
 
           if [ ! -f content_history.json ]; then
-
-            echo "content_history.json not found."
-
+            echo "No content_history.json found."
             exit 0
-
           fi
 
-
-          git config user.name \
-            "github-actions[bot]"
-
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add content_history.json
 
-
           if git diff --cached --quiet; then
-
             echo "No history changes to commit."
-
           else
-
-            git commit \
-              -m "chore: update shayari content history"
-
+            git commit -m "Update Shayari content history [skip ci]"
             git push
-
+            echo "Content history committed."
           fi
 
-
-      # ======================================================
-      # 20. CLEAN SENSITIVE FILES
-      # ======================================================
-      #
-      # Even though GitHub destroys the runner after the job,
-      # explicitly remove credentials.
-      #
-      # ======================================================
-
-      - name: Remove OAuth credentials
-
+      # =========================================================
+      # 17. REMOVE SECRETS
+      # =========================================================
+      - name: Cleanup OAuth credentials
         if: always()
-
+        shell: bash
         run: |
-
           rm -f client_secrets.json
           rm -f credentials.json
 
-          echo "Sensitive OAuth files removed."
+          echo "OAuth credential files removed."
 
-
-      # ======================================================
-      # 21. FINAL STATUS
-      # ======================================================
-
-      - name: Final status
-
-        if: success()
-
+      # =========================================================
+      # 18. FINAL STATUS
+      # =========================================================
+      - name: Final summary
+        if: always()
+        shell: bash
         run: |
-
           echo ""
-          echo "================================================"
-          echo "SHAYARI AUTOMATION COMPLETED"
-          echo "================================================"
+          echo "=============================================="
+          echo " WORKFLOW SUMMARY"
+          echo "=============================================="
           echo ""
-          echo "YouTube upload: SUCCESS"
-          echo "Privacy: UNLISTED"
-          echo "Video: 1080x1920"
+          echo "Run number : ${{ github.run_number }}"
+          echo "Trigger    : ${{ github.event_name }}"
+          echo "Branch     : ${{ github.ref_name }}"
           echo ""
-          echo "You can manually make the video PUBLIC"
-          echo "from YouTube Studio."
+          echo "Expected:"
+          echo "  Video       : 1080x1920"
+          echo "  Duration    : 5-7 sec"
+          echo "  Category    : Entertainment (24)"
+          echo "  Privacy     : UNLISTED"
+          echo "  Voice       : OFF"
+          echo "  Animation   : OFF"
+          echo "  SEO         : title + description + queries + tags + hashtags"
           echo ""
-          echo "================================================"
+          echo "=============================================="
