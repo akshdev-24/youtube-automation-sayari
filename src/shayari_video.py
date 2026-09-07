@@ -1,113 +1,414 @@
 # ============================================================
 # FILE: src/shayari_video.py
-# HINGLISH SHAYARI STATIC SHORT VIDEO GENERATOR
+# ============================================================
+#
+# HINGLISH SHAYARI SHORT VIDEO GENERATOR
+#
+# DESIGN:
+#   - User background ONLY
+#   - No card
+#   - No paper overlay
+#   - No external image
+#   - No UI
+#   - Static typography
+#   - Reference-inspired serif typography
+#   - Reference-inspired spacing
+#   - User music only
+#
+# OUTPUT:
+#   1080 x 1920
+#   9:16
+#   H.264 + AAC
+#
 # ============================================================
 
-from pathlib import Path
 import os
-import textwrap
+import math
+from pathlib import Path
+from typing import List, Tuple
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 
 from moviepy.editor import (
     ImageClip,
     VideoFileClip,
     AudioFileClip,
     CompositeVideoClip,
-    concatenate_videoclips,
+    concatenate_audioclips,
 )
 
 
 # ============================================================
-# CONFIG
+# PATHS
 # ============================================================
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-ASSETS_DIR = ROOT_DIR / "assets"
+ASSETS_DIR = BASE_DIR / "assets"
+
 MUSIC_DIR = ASSETS_DIR / "music"
+
+FONTS_DIR = ASSETS_DIR / "fonts"
+
+OUTPUT_DIR = BASE_DIR / "output"
+
+
+# ============================================================
+# VIDEO CONFIG
+# ============================================================
 
 WIDTH = 1080
 HEIGHT = 1920
 
-DEFAULT_DURATION = int(
-    os.getenv("SHAYARI_DURATION", "15")
-)
-
 FPS = 30
 
+DEFAULT_DURATION = int(
+    os.getenv(
+        "SHAYARI_DURATION",
+        "15"
+    )
+)
+
 
 # ============================================================
-# BACKGROUND SEARCH
+# DESIGN CONFIG
 # ============================================================
 
-def find_background():
-    """
-    Find user-provided background.
+# Main body font size.
+#
+# Reference video at 720x1280 uses a large serif font.
+# 1080x1920 scale is approximately 1.5x.
+#
+BODY_FONT_SIZE = int(
+    os.getenv(
+        "SHAYARI_FONT_SIZE",
+        "46"
+    )
+)
 
-    Priority:
-        background.jpg
-        background.jpeg
-        background.png
-        background.webp
-        background.mp4
-        background.mov
-        fallback.jpg
-    """
+# Smaller branding text.
+BRAND_FONT_SIZE = int(
+    os.getenv(
+        "BRAND_FONT_SIZE",
+        "30"
+    )
+)
 
-    image_files = [
-        "background.jpg",
-        "background.jpeg",
-        "background.png",
-        "background.webp",
-        "bg.jpg",
-        "bg.jpeg",
-        "bg.png",
+# Footer.
+FOOTER_FONT_SIZE = int(
+    os.getenv(
+        "FOOTER_FONT_SIZE",
+        "22"
+    )
+)
+
+# Text area.
+LEFT_MARGIN = int(
+    os.getenv(
+        "TEXT_LEFT_MARGIN",
+        "135"
+    )
+)
+
+RIGHT_MARGIN = int(
+    os.getenv(
+        "TEXT_RIGHT_MARGIN",
+        "135"
+    )
+)
+
+TEXT_MAX_WIDTH = (
+    WIDTH
+    - LEFT_MARGIN
+    - RIGHT_MARGIN
+)
+
+
+# ============================================================
+# TEXT POSITION
+# ============================================================
+
+# Reference composition has the brand in the upper section
+# and the poetry below it.
+#
+# Since there is NO card anymore, the text is positioned
+# relative to the entire user's background.
+
+BRAND_Y = int(
+    os.getenv(
+        "BRAND_Y",
+        "330"
+    )
+)
+
+POETRY_Y = int(
+    os.getenv(
+        "POETRY_Y",
+        "650"
+    )
+)
+
+
+# ============================================================
+# COLORS
+# ============================================================
+
+# Classic reference-style dark text.
+#
+# We intentionally keep the text almost black rather than
+# pure black so it feels slightly softer.
+
+TEXT_COLOR = (
+    18,
+    18,
+    18,
+    255
+)
+
+BRAND_COLOR = (
+    25,
+    25,
+    25,
+    255
+)
+
+FOOTER_COLOR = (
+    35,
+    35,
+    35,
+    210
+)
+
+
+# ============================================================
+# TEXT SHADOW
+# ============================================================
+
+# Very subtle shadow.
+#
+# This is NOT a background overlay/card.
+# It only helps black typography remain readable over photos.
+
+SHADOW_COLOR = (
+    255,
+    255,
+    255,
+    95
+)
+
+SHADOW_OFFSET = 2
+
+SHADOW_BLUR = 1
+
+
+# ============================================================
+# BACKGROUND FILTER
+# ============================================================
+
+# Reference videos have a soft, muted, slightly warm
+# photographic appearance.
+#
+# This filter is intentionally subtle.
+#
+# It does NOT create a paper/card layer.
+#
+FILTER_ENABLED = (
+    os.getenv(
+        "REFERENCE_FILTER",
+        "true"
+    ).lower()
+    == "true"
+)
+
+
+# ============================================================
+# FONT DISCOVERY
+# ============================================================
+
+def find_font(
+    preferred_names: List[str],
+    fallback_names: List[str],
+) -> str:
+
+    candidates = []
+
+    for name in preferred_names:
+        candidates.extend([
+            FONTS_DIR / name,
+            BASE_DIR / name,
+        ])
+
+    # Windows fonts
+    windows_fonts = Path(
+        os.environ.get(
+            "WINDIR",
+            "C:/Windows"
+        )
+    ) / "Fonts"
+
+    candidates.extend([
+        windows_fonts / "times.ttf",
+        windows_fonts / "timesnewroman.ttf",
+        windows_fonts / "georgia.ttf",
+        windows_fonts / "baskerville.ttf",
+        windows_fonts / "cambria.ttf",
+        windows_fonts / "arial.ttf",
+    ])
+
+    # Linux / GitHub Actions fonts
+    candidates.extend([
+        Path(
+            "/usr/share/fonts/truetype/"
+            "liberation2/LiberationSerif-Regular.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/"
+            "liberation2/LiberationSerif-Italic.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSerif.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSerif-Italic.ttf"
+        ),
+    ])
+
+    # Explicit fallback names
+    for name in fallback_names:
+        candidates.append(
+            FONTS_DIR / name
+        )
+
+    for candidate in candidates:
+
+        try:
+
+            if candidate.exists():
+                return str(candidate)
+
+        except Exception:
+            pass
+
+    raise FileNotFoundError(
+        "No suitable serif font found. "
+        "Please put a .ttf font inside assets/fonts/."
+    )
+
+
+def get_body_font() -> str:
+
+    return find_font(
+        preferred_names=[
+            "body.ttf",
+            "TimesNewRoman.ttf",
+            "times.ttf",
+            "Georgia.ttf",
+        ],
+        fallback_names=[
+            "arial.ttf",
+        ]
+    )
+
+
+def get_brand_font() -> str:
+
+    return find_font(
+        preferred_names=[
+            "brand.ttf",
+            "TimesNewRomanItalic.ttf",
+            "timesi.ttf",
+            "GeorgiaItalic.ttf",
+        ],
+        fallback_names=[
+            "ariali.ttf",
+        ]
+    )
+
+
+# ============================================================
+# BACKGROUND DISCOVERY
+# ============================================================
+
+def find_background() -> Path:
+
+    preferred = [
+
+        ASSETS_DIR / "background.jpg",
+
+        ASSETS_DIR / "background.jpeg",
+
+        ASSETS_DIR / "background.png",
+
+        ASSETS_DIR / "background.webp",
+
+        ASSETS_DIR / "background.mp4",
+
+        ASSETS_DIR / "background.mov",
+
+        ASSETS_DIR / "background.mkv",
     ]
 
-    video_files = [
-        "background.mp4",
-        "background.mov",
-        "background.webm",
-        "bg.mp4",
-        "bg.mov",
-    ]
-
-    for filename in image_files:
-        path = ASSETS_DIR / filename
+    for path in preferred:
 
         if path.exists():
             return path
 
-    for filename in video_files:
-        path = ASSETS_DIR / filename
+    # Generic fallback.
+    extensions = [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".mp4",
+        ".mov",
+        ".mkv",
+    ]
 
-        if path.exists():
+    for path in ASSETS_DIR.iterdir():
+
+        if (
+            path.is_file()
+            and path.suffix.lower()
+            in extensions
+        ):
             return path
-
-    fallback = ASSETS_DIR / "fallback.jpg"
-
-    if fallback.exists():
-        return fallback
 
     raise FileNotFoundError(
         "No background found.\n"
-        "Put your background at:\n"
+        "Put your background here:\n"
         "assets/background.jpg"
     )
 
 
 # ============================================================
-# MUSIC SEARCH
+# MUSIC DISCOVERY
 # ============================================================
 
-def find_music():
-    """
-    Find background music inside assets/music.
-    """
+def find_music() -> Path:
 
-    if not MUSIC_DIR.exists():
-        return None
+    preferred = [
+
+        MUSIC_DIR / "bg_music.mp3",
+
+        MUSIC_DIR / "background.mp3",
+
+        MUSIC_DIR / "music.mp3",
+
+        MUSIC_DIR / "bg_music.wav",
+
+        MUSIC_DIR / "background.wav",
+    ]
+
+    for path in preferred:
+
+        if path.exists():
+            return path
 
     extensions = [
         ".mp3",
@@ -117,680 +418,987 @@ def find_music():
         ".ogg",
     ]
 
-    for file in sorted(
-        MUSIC_DIR.iterdir()
-    ):
+    if MUSIC_DIR.exists():
 
-        if file.is_file() and file.suffix.lower() in extensions:
-            return file
+        for path in MUSIC_DIR.iterdir():
 
-    return None
+            if (
+                path.is_file()
+                and path.suffix.lower()
+                in extensions
+            ):
+                return path
 
-
-# ============================================================
-# CROP IMAGE TO 9:16
-# ============================================================
-
-def crop_to_vertical(
-    image: Image.Image,
-    width=WIDTH,
-    height=HEIGHT,
-):
-    """
-    Crop image to exact 1080x1920 aspect ratio.
-    """
-
-    image = image.convert("RGB")
-
-    target_ratio = width / height
-    image_ratio = image.width / image.height
-
-    if image_ratio > target_ratio:
-
-        # Image too wide.
-        new_width = int(
-            image.height * target_ratio
-        )
-
-        left = (
-            image.width - new_width
-        ) // 2
-
-        image = image.crop(
-            (
-                left,
-                0,
-                left + new_width,
-                image.height,
-            )
-        )
-
-    else:
-
-        # Image too tall.
-        new_height = int(
-            image.width / target_ratio
-        )
-
-        top = (
-            image.height - new_height
-        ) // 2
-
-        image = image.crop(
-            (
-                0,
-                top,
-                image.width,
-                top + new_height,
-            )
-        )
-
-    return image.resize(
-        (width, height),
-        Image.Resampling.LANCZOS,
+    raise FileNotFoundError(
+        "No music found.\n"
+        "Put your music here:\n"
+        "assets/music/bg_music.mp3"
     )
 
 
 # ============================================================
-# FONT
+# IMAGE CROP
 # ============================================================
 
-def find_font(
-    bold=False,
-    size=60,
-):
-    """
-    Find a usable font from assets/fonts.
-    """
+def crop_to_vertical(
+    image: Image.Image,
+    target_width: int = WIDTH,
+    target_height: int = HEIGHT,
+) -> Image.Image:
 
-    font_dir = ASSETS_DIR / "fonts"
+    image = image.convert("RGB")
 
-    candidates = []
+    src_w, src_h = image.size
 
-    if bold:
+    target_ratio = (
+        target_width
+        / target_height
+    )
 
-        candidates = [
-            font_dir / "arialbd.ttf",
-            font_dir / "arial.ttf",
-        ]
+    src_ratio = (
+        src_w
+        / src_h
+    )
+
+    # --------------------------------------------------------
+    # Landscape / wide image
+    # --------------------------------------------------------
+
+    if src_ratio > target_ratio:
+
+        new_height = src_h
+
+        new_width = int(
+            src_h
+            * target_ratio
+        )
+
+        left = (
+            src_w
+            - new_width
+        ) // 2
+
+        top = 0
+
+    # --------------------------------------------------------
+    # Portrait image
+    # --------------------------------------------------------
 
     else:
 
-        candidates = [
-            font_dir / "arial.ttf",
-            font_dir / "ariali.ttf",
-        ]
+        new_width = src_w
 
-    for path in candidates:
+        new_height = int(
+            src_w
+            / target_ratio
+        )
 
-        if path.exists():
+        left = 0
 
-            return ImageFont.truetype(
-                str(path),
-                size,
-            )
+        top = (
+            src_h
+            - new_height
+        ) // 2
 
-    # Linux/GitHub Actions fallback.
-    linux_fonts = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    image = image.crop(
+        (
+            left,
+            top,
+            left + new_width,
+            top + new_height
+        )
+    )
+
+    image = image.resize(
+        (
+            target_width,
+            target_height
+        ),
+        Image.Resampling.LANCZOS
+    )
+
+    return image
+
+
+# ============================================================
+# REFERENCE-STYLE FILTER
+# ============================================================
+
+def apply_reference_filter(
+    image: Image.Image
+) -> Image.Image:
+
+    if not FILTER_ENABLED:
+        return image
+
+    image = image.convert("RGB")
+
+    # --------------------------------------------------------
+    # Slightly lower saturation.
+    # --------------------------------------------------------
+
+    image = ImageEnhance.Color(
+        image
+    ).enhance(
+        0.82
+    )
+
+    # --------------------------------------------------------
+    # Slight contrast increase.
+    # --------------------------------------------------------
+
+    image = ImageEnhance.Contrast(
+        image
+    ).enhance(
+        1.05
+    )
+
+    # --------------------------------------------------------
+    # Slight brightness reduction.
+    # --------------------------------------------------------
+
+    image = ImageEnhance.Brightness(
+        image
+    ).enhance(
+        0.94
+    )
+
+    # --------------------------------------------------------
+    # Very subtle warm tone.
+    # --------------------------------------------------------
+
+    arr = np.asarray(
+        image
+    ).astype(
+        np.float32
+    )
+
+    # Warm the image slightly.
+    arr[:, :, 0] *= 1.025
+    arr[:, :, 1] *= 1.000
+    arr[:, :, 2] *= 0.970
+
+    arr = np.clip(
+        arr,
+        0,
+        255
+    ).astype(
+        np.uint8
+    )
+
+    image = Image.fromarray(
+        arr,
+        "RGB"
+    )
+
+    # --------------------------------------------------------
+    # Subtle cinematic vignette.
+    #
+    # This is a filter on the user's background,
+    # NOT an overlay card.
+    # --------------------------------------------------------
+
+    w, h = image.size
+
+    yy, xx = np.mgrid[
+        0:h,
+        0:w
     ]
 
-    for path in linux_fonts:
+    cx = w / 2
+    cy = h / 2
 
-        if os.path.exists(path):
+    dx = (
+        xx - cx
+    ) / cx
 
-            return ImageFont.truetype(
-                path,
-                size,
-            )
+    dy = (
+        yy - cy
+    ) / cy
 
-    return ImageFont.load_default()
+    distance = np.sqrt(
+        dx * dx
+        + dy * dy
+    )
+
+    vignette = np.clip(
+        1.0
+        - 0.10
+        * np.maximum(
+            distance - 0.45,
+            0
+        ),
+        0.84,
+        1.0
+    )
+
+    arr = np.asarray(
+        image
+    ).astype(
+        np.float32
+    )
+
+    arr *= vignette[:, :, None]
+
+    arr = np.clip(
+        arr,
+        0,
+        255
+    ).astype(
+        np.uint8
+    )
+
+    return Image.fromarray(
+        arr,
+        "RGB"
+    )
 
 
 # ============================================================
 # TEXT WRAPPING
 # ============================================================
 
-def wrap_shayari(
-    text,
-    font,
-    max_width,
-    draw,
-):
-    """
-    Wrap Shayari based on actual pixel width.
-    """
+def wrap_text_to_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+) -> List[str]:
 
-    output_lines = []
+    words = text.split()
 
-    for original_line in text.splitlines():
+    if not words:
+        return [""]
 
-        line = original_line.strip()
+    lines = []
 
-        if not line:
-            output_lines.append("")
-            continue
+    current = words[0]
 
-        words = line.split()
+    for word in words[1:]:
 
-        current = ""
+        candidate = (
+            current
+            + " "
+            + word
+        )
 
-        for word in words:
+        bbox = draw.textbbox(
+            (0, 0),
+            candidate,
+            font=font
+        )
 
-            test = (
-                word
-                if not current
-                else current + " " + word
-            )
+        width = (
+            bbox[2]
+            - bbox[0]
+        )
 
-            bbox = draw.textbbox(
-                (0, 0),
-                test,
-                font=font,
-            )
+        if width <= max_width:
 
-            text_width = (
-                bbox[2] - bbox[0]
-            )
+            current = candidate
 
-            if text_width <= max_width:
+        else:
 
-                current = test
-
-            else:
-
-                if current:
-                    output_lines.append(
-                        current
-                    )
-
-                current = word
-
-        if current:
-            output_lines.append(
+            lines.append(
                 current
             )
 
-    return output_lines
+            current = word
+
+    lines.append(
+        current
+    )
+
+    return lines
 
 
 # ============================================================
-# CREATE STATIC CARD
+# MEASURE TEXT
 # ============================================================
 
-def create_shayari_card(
-    shayari: str,
+def get_text_size(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+) -> Tuple[int, int]:
+
+    bbox = draw.textbbox(
+        (0, 0),
+        text,
+        font=font
+    )
+
+    return (
+        bbox[2] - bbox[0],
+        bbox[3] - bbox[1]
+    )
+
+
+# ============================================================
+# DRAW TEXT WITH SHADOW
+# ============================================================
+
+def draw_text_with_shadow(
+    layer: Image.Image,
+    position: Tuple[int, int],
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill,
+    anchor=None,
 ):
-    """
-    Create the static cream Shayari card.
 
-    No animation.
-    """
-
-    # --------------------------------------------------------
-    # Transparent overlay
-    # --------------------------------------------------------
-
-    card = Image.new(
+    shadow_layer = Image.new(
         "RGBA",
-        (WIDTH, HEIGHT),
-        (0, 0, 0, 0),
-    )
-
-    draw = ImageDraw.Draw(
-        card
-    )
-
-    # --------------------------------------------------------
-    # Card dimensions
-    # --------------------------------------------------------
-
-    card_left = 70
-    card_right = WIDTH - 70
-
-    card_top = 170
-    card_bottom = HEIGHT - 170
-
-    card_width = (
-        card_right - card_left
-    )
-
-    card_height = (
-        card_bottom - card_top
-    )
-
-    radius = 42
-
-    # --------------------------------------------------------
-    # Shadow
-    # --------------------------------------------------------
-
-    shadow = Image.new(
-        "RGBA",
-        (WIDTH, HEIGHT),
-        (0, 0, 0, 0),
+        layer.size,
+        (0, 0, 0, 0)
     )
 
     shadow_draw = ImageDraw.Draw(
-        shadow
+        shadow_layer
     )
 
-    shadow_draw.rounded_rectangle(
+    x, y = position
+
+    shadow_draw.text(
         (
-            card_left + 12,
-            card_top + 18,
-            card_right + 12,
-            card_bottom + 18,
+            x + SHADOW_OFFSET,
+            y + SHADOW_OFFSET
         ),
-        radius=radius,
-        fill=(0, 0, 0, 150),
+        text,
+        font=font,
+        fill=SHADOW_COLOR,
+        anchor=anchor
     )
 
-    shadow = shadow.filter(
-        ImageFilter.GaussianBlur(18)
-    )
+    if SHADOW_BLUR > 0:
 
-    card.alpha_composite(
-        shadow
+        shadow_layer = shadow_layer.filter(
+            ImageFilter.GaussianBlur(
+                SHADOW_BLUR
+            )
+        )
+
+    layer.alpha_composite(
+        shadow_layer
     )
 
     draw = ImageDraw.Draw(
-        card
+        layer
     )
-
-    # --------------------------------------------------------
-    # Main cream card
-    # --------------------------------------------------------
-
-    draw.rounded_rectangle(
-        (
-            card_left,
-            card_top,
-            card_right,
-            card_bottom,
-        ),
-        radius=radius,
-        fill=(242, 235, 220, 255),
-    )
-
-    # --------------------------------------------------------
-    # Top brand
-    # --------------------------------------------------------
-
-    brand_font = find_font(
-        bold=True,
-        size=34,
-    )
-
-    small_font = find_font(
-        bold=False,
-        size=25,
-    )
-
-    brand = "MEHFIL-E-SHAYARI"
-
-    brand_bbox = draw.textbbox(
-        (0, 0),
-        brand,
-        font=brand_font,
-    )
-
-    brand_width = (
-        brand_bbox[2]
-        - brand_bbox[0]
-    )
-
-    brand_x = (
-        WIDTH - brand_width
-    ) // 2
 
     draw.text(
-        (
-            brand_x,
-            card_top + 70,
+        position,
+        text,
+        font=font,
+        fill=fill,
+        anchor=anchor
+    )
+
+
+# ============================================================
+# BRAND
+# ============================================================
+
+def draw_brand(
+    layer: Image.Image,
+    brand_text: str = "Mehfil-e-Shayariii",
+):
+
+    font_path = get_brand_font()
+
+    font = ImageFont.truetype(
+        font_path,
+        BRAND_FONT_SIZE
+    )
+
+    draw = ImageDraw.Draw(
+        layer
+    )
+
+    # --------------------------------------------------------
+    # Reference-inspired centered branding.
+    #
+    # No circle/logo/card is generated.
+    # This is ONLY text.
+    # --------------------------------------------------------
+
+    bbox = draw.textbbox(
+        (0, 0),
+        brand_text,
+        font=font
+    )
+
+    text_width = (
+        bbox[2]
+        - bbox[0]
+    )
+
+    x = (
+        WIDTH
+        - text_width
+    ) // 2
+
+    draw_text_with_shadow(
+        layer=layer,
+        position=(
+            x,
+            BRAND_Y
         ),
-        brand,
-        font=brand_font,
-        fill=(45, 40, 35, 255),
+        text=brand_text,
+        font=font,
+        fill=BRAND_COLOR
     )
 
-    # Small divider.
-    divider_y = card_top + 125
 
-    draw.line(
-        (
-            WIDTH // 2 - 50,
-            divider_y,
-            WIDTH // 2 + 50,
-            divider_y,
-        ),
-        fill=(100, 90, 75, 180),
-        width=2,
-    )
+# ============================================================
+# POETRY LAYOUT
+# ============================================================
 
-    # --------------------------------------------------------
-    # Shayari font
-    # --------------------------------------------------------
+def prepare_poetry_lines(
+    lines: List[str]
+) -> List[str]:
 
-    shayari_font_size = 58
-
-    shayari_font = find_font(
-        bold=False,
-        size=shayari_font_size,
-    )
-
-    max_text_width = card_width - 130
-
-    lines = wrap_shayari(
-        shayari,
-        shayari_font,
-        max_text_width,
-        draw,
-    )
-
-    # --------------------------------------------------------
-    # Calculate total text height
-    # --------------------------------------------------------
-
-    line_spacing = 24
-
-    measured_lines = []
+    prepared = []
 
     for line in lines:
 
-        if not line:
-            measured_lines.append(
-                (0, 0)
-            )
+        if line is None:
+            prepared.append("")
             continue
 
-        bbox = draw.textbbox(
-            (0, 0),
-            line,
-            font=shayari_font,
+        line = str(
+            line
+        ).strip()
+
+        prepared.append(
+            line
         )
 
-        measured_lines.append(
-            (
-                bbox[2] - bbox[0],
-                bbox[3] - bbox[1],
-            )
-        )
-
-    total_height = 0
-
-    for _, line_height in measured_lines:
-
-        total_height += (
-            line_height
-            + line_spacing
-        )
-
-    # --------------------------------------------------------
-    # Keep text inside card.
-    # --------------------------------------------------------
-
-    available_height = (
-        card_height - 330
-    )
+    # Remove blank lines at beginning/end.
+    while (
+        prepared
+        and not prepared[0]
+    ):
+        prepared.pop(0)
 
     while (
-        total_height > available_height
-        and shayari_font_size > 38
+        prepared
+        and not prepared[-1]
     ):
+        prepared.pop()
 
-        shayari_font_size -= 2
+    return prepared
 
-        shayari_font = find_font(
-            bold=False,
-            size=shayari_font_size,
-        )
 
-        lines = wrap_shayari(
-            shayari,
-            shayari_font,
-            max_text_width,
-            draw,
-        )
+# ============================================================
+# DRAW SHAYARI
+# ============================================================
 
-        measured_lines = []
+def draw_shayari(
+    layer: Image.Image,
+    lines: List[str],
+):
 
-        for line in lines:
-
-            if not line:
-                measured_lines.append(
-                    (0, 0)
-                )
-                continue
-
-            bbox = draw.textbbox(
-                (0, 0),
-                line,
-                font=shayari_font,
-            )
-
-            measured_lines.append(
-                (
-                    bbox[2] - bbox[0],
-                    bbox[3] - bbox[1],
-                )
-            )
-
-        total_height = sum(
-            height + line_spacing
-            for _, height in measured_lines
-        )
-
-    # --------------------------------------------------------
-    # Center Shayari vertically.
-    # --------------------------------------------------------
-
-    text_start_y = (
-        card_top
-        + (card_height - total_height) // 2
-        + 20
+    lines = prepare_poetry_lines(
+        lines
     )
 
-    current_y = text_start_y
+    body_font_path = get_body_font()
 
-    for index, line in enumerate(lines):
+    font = ImageFont.truetype(
+        body_font_path,
+        BODY_FONT_SIZE
+    )
 
-        if not line:
-            current_y += 20
+    draw = ImageDraw.Draw(
+        layer
+    )
+
+    # --------------------------------------------------------
+    # Reference typography metrics.
+    # --------------------------------------------------------
+
+    sample_height = get_text_size(
+        draw,
+        "Ag",
+        font
+    )[1]
+
+    line_spacing = int(
+        sample_height * 0.36
+    )
+
+    # Extra vertical space between poetry blocks.
+    block_spacing = int(
+        sample_height * 1.05
+    )
+
+    current_y = POETRY_Y
+
+    for index, raw_line in enumerate(lines):
+
+        # ----------------------------------------------------
+        # Blank line = intentional poetry block spacing.
+        # ----------------------------------------------------
+
+        if not raw_line:
+
+            current_y += (
+                block_spacing
+            )
+
             continue
 
-        bbox = draw.textbbox(
-            (0, 0),
-            line,
-            font=shayari_font,
+        # ----------------------------------------------------
+        # Wrap only if the generated line is too long.
+        # ----------------------------------------------------
+
+        wrapped = wrap_text_to_width(
+            draw,
+            raw_line,
+            font,
+            TEXT_MAX_WIDTH
         )
 
-        line_width = (
-            bbox[2] - bbox[0]
-        )
+        for wrapped_line in wrapped:
 
-        line_height = (
-            bbox[3] - bbox[1]
-        )
+            # ------------------------------------------------
+            # Reference style is left-aligned within the
+            # text area.
+            # ------------------------------------------------
 
-        x = (
-            WIDTH - line_width
-        ) // 2
+            x = LEFT_MARGIN
 
-        draw.text(
-            (
-                x,
-                current_y,
-            ),
-            line,
-            font=shayari_font,
-            fill=(35, 32, 29, 255),
-        )
+            draw_text_with_shadow(
+                layer=layer,
+                position=(
+                    x,
+                    current_y
+                ),
+                text=wrapped_line,
+                font=font,
+                fill=TEXT_COLOR
+            )
 
-        current_y += (
-            line_height
-            + line_spacing
+            current_y += (
+                sample_height
+                + line_spacing
+            )
+
+        # ----------------------------------------------------
+        # Safety: never allow text to run off-screen.
+        # ----------------------------------------------------
+
+        if current_y > HEIGHT - 250:
+
+            break
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+def draw_footer(
+    layer: Image.Image,
+    footer_text: str = "HINGLISH SHAYARI",
+):
+
+    font_path = get_body_font()
+
+    font = ImageFont.truetype(
+        font_path,
+        FOOTER_FONT_SIZE
+    )
+
+    draw = ImageDraw.Draw(
+        layer
+    )
+
+    bbox = draw.textbbox(
+        (0, 0),
+        footer_text,
+        font=font
+    )
+
+    text_width = (
+        bbox[2]
+        - bbox[0]
+    )
+
+    x = (
+        WIDTH
+        - text_width
+    ) // 2
+
+    y = HEIGHT - 110
+
+    draw.text(
+        (
+            x,
+            y
+        ),
+        footer_text,
+        font=font,
+        fill=FOOTER_COLOR
+    )
+
+
+# ============================================================
+# RENDER IMAGE
+# ============================================================
+
+def render_image_background(
+    background_path: Path,
+    lines: List[str],
+    brand: str = "Mehfil-e-Shayariii",
+) -> Image.Image:
+
+    print(
+        f"🖼️ Loading background: {background_path}"
+    )
+
+    image = Image.open(
+        background_path
+    ).convert(
+        "RGB"
+    )
+
+    print(
+        f"Original background size: {image.size}"
+    )
+
+    # --------------------------------------------------------
+    # Crop to exact 9:16.
+    # --------------------------------------------------------
+
+    image = crop_to_vertical(
+        image,
+        WIDTH,
+        HEIGHT
+    )
+
+    # --------------------------------------------------------
+    # Apply reference-inspired filter.
+    # --------------------------------------------------------
+
+    image = apply_reference_filter(
+        image
+    )
+
+    # --------------------------------------------------------
+    # Transparent text layer ONLY.
+    #
+    # IMPORTANT:
+    # There is NO rectangle/card/page.
+    # --------------------------------------------------------
+
+    layer = Image.new(
+        "RGBA",
+        (
+            WIDTH,
+            HEIGHT
+        ),
+        (
+            0,
+            0,
+            0,
+            0
         )
+    )
+
+    # --------------------------------------------------------
+    # Brand
+    # --------------------------------------------------------
+
+    draw_brand(
+        layer,
+        brand
+    )
+
+    # --------------------------------------------------------
+    # Shayari
+    # --------------------------------------------------------
+
+    draw_shayari(
+        layer,
+        lines
+    )
 
     # --------------------------------------------------------
     # Footer
     # --------------------------------------------------------
 
-    footer = "HINGLISH SHAYARI"
-
-    footer_bbox = draw.textbbox(
-        (0, 0),
-        footer,
-        font=small_font,
+    draw_footer(
+        layer
     )
 
-    footer_width = (
-        footer_bbox[2]
-        - footer_bbox[0]
+    # --------------------------------------------------------
+    # Composite text over user's image.
+    #
+    # This is the ONLY compositing operation.
+    # --------------------------------------------------------
+
+    result = Image.alpha_composite(
+        image.convert("RGBA"),
+        layer
     )
 
-    footer_x = (
-        WIDTH - footer_width
-    ) // 2
-
-    draw.text(
-        (
-            footer_x,
-            card_bottom - 80,
-        ),
-        footer,
-        font=small_font,
-        fill=(95, 85, 72, 230),
+    return result.convert(
+        "RGB"
     )
-
-    return card
 
 
 # ============================================================
-# PREPARE IMAGE BACKGROUND
+# IMAGE VIDEO
 # ============================================================
 
-def prepare_image_background(
-    path: Path,
-):
-    """
-    Load and prepare static image background.
-    """
+def create_image_video(
+    background_path: Path,
+    lines: List[str],
+    duration: int,
+) -> ImageClip:
 
-    image = Image.open(
-        path
-    ).convert("RGB")
-
-    image = crop_to_vertical(
-        image
+    image = render_image_background(
+        background_path,
+        lines
     )
 
-    temp_path = (
-        ROOT_DIR
-        / "output"
-        / "_background_temp.jpg"
+    clip = (
+        ImageClip(
+            np.array(image)
+        )
+        .set_duration(
+            duration
+        )
+        .set_fps(
+            FPS
+        )
     )
 
-    temp_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    image.save(
-        temp_path,
-        quality=95,
-    )
-
-    return temp_path
+    return clip
 
 
 # ============================================================
-# PREPARE VIDEO BACKGROUND
+# VIDEO BACKGROUND
 # ============================================================
 
 def prepare_video_background(
-    path: Path,
-    duration: float,
-):
-    """
-    Load video background and crop it to 9:16.
-    """
+    background_path: Path,
+    duration: int,
+) -> VideoFileClip:
 
-    clip = VideoFileClip(
-        str(path)
+    source = VideoFileClip(
+        str(background_path),
+        audio=False
     )
 
-    # If source is shorter than desired duration,
-    # loop it.
-    if clip.duration < duration:
+    # --------------------------------------------------------
+    # Loop if shorter than requested duration.
+    # --------------------------------------------------------
 
-        loops = int(
-            duration / clip.duration
-        ) + 1
+    if source.duration < duration:
+
+        repeat_count = int(
+            math.ceil(
+                duration
+                / source.duration
+            )
+        )
 
         clips = [
-            clip
-            for _ in range(loops)
+            source
+            for _ in range(
+                repeat_count
+            )
         ]
 
-        clip = concatenate_videoclips(
-            clips
+        from moviepy.editor import concatenate_videoclips
+
+        video = concatenate_videoclips(
+            clips,
+            method="compose"
         )
 
-    clip = clip.subclip(
-        0,
-        min(
-            duration,
-            clip.duration,
-        ),
-    )
-
-    # --------------------------------------------------------
-    # Resize while maintaining aspect ratio.
-    # --------------------------------------------------------
-
-    source_ratio = (
-        clip.w / clip.h
-    )
-
-    target_ratio = (
-        WIDTH / HEIGHT
-    )
-
-    if source_ratio > target_ratio:
-
-        # Source too wide.
-        clip = clip.resize(
-            height=HEIGHT
-        )
-
-        x1 = (
-            clip.w - WIDTH
-        ) / 2
-
-        clip = clip.crop(
-            x1=x1,
-            x2=x1 + WIDTH,
+        video = video.subclip(
+            0,
+            duration
         )
 
     else:
 
-        # Source too tall.
-        clip = clip.resize(
+        video = source.subclip(
+            0,
+            duration
+        )
+
+    # --------------------------------------------------------
+    # Resize/crop to 9:16.
+    # --------------------------------------------------------
+
+    source_w = video.w
+    source_h = video.h
+
+    target_ratio = (
+        WIDTH
+        / HEIGHT
+    )
+
+    source_ratio = (
+        source_w
+        / source_h
+    )
+
+    if source_ratio > target_ratio:
+
+        # Landscape.
+        new_h = HEIGHT
+
+        new_w = int(
+            source_w
+            * HEIGHT
+            / source_h
+        )
+
+        video = video.resize(
+            height=HEIGHT
+        )
+
+        x1 = (
+            new_w
+            - WIDTH
+        ) // 2
+
+        video = video.crop(
+            x1=x1,
+            y1=0,
+            x2=x1 + WIDTH,
+            y2=HEIGHT
+        )
+
+    else:
+
+        # Portrait.
+        new_w = WIDTH
+
+        new_h = int(
+            source_h
+            * WIDTH
+            / source_w
+        )
+
+        video = video.resize(
             width=WIDTH
         )
 
         y1 = (
-            clip.h - HEIGHT
-        ) / 2
+            new_h
+            - HEIGHT
+        ) // 2
 
-        clip = clip.crop(
+        video = video.crop(
+            x1=0,
             y1=y1,
-            y2=y1 + HEIGHT,
+            x2=WIDTH,
+            y2=y1 + HEIGHT
         )
 
-    return clip
+    return video
+
+
+# ============================================================
+# TEXT OVERLAY FOR VIDEO BACKGROUND
+# ============================================================
+
+def make_text_frame(
+    lines: List[str]
+) -> np.ndarray:
+
+    layer = Image.new(
+        "RGBA",
+        (
+            WIDTH,
+            HEIGHT
+        ),
+        (
+            0,
+            0,
+            0,
+            0
+        )
+    )
+
+    draw_brand(
+        layer,
+        "Mehfil-e-Shayariii"
+    )
+
+    draw_shayari(
+        layer,
+        lines
+    )
+
+    draw_footer(
+        layer
+    )
+
+    return np.array(
+        layer
+    )
+
+
+# ============================================================
+# VIDEO BACKGROUND RENDER
+# ============================================================
+
+def create_video_background(
+    background_path: Path,
+    lines: List[str],
+    duration: int,
+):
+
+    video = prepare_video_background(
+        background_path,
+        duration
+    )
+
+    # --------------------------------------------------------
+    # Text is rendered as a transparent layer.
+    #
+    # IMPORTANT:
+    # No card.
+    # No page.
+    # No image.
+    # --------------------------------------------------------
+
+    text_frame = make_text_frame(
+        lines
+    )
+
+    text_clip = (
+        ImageClip(
+            text_frame,
+            transparent=True
+        )
+        .set_duration(
+            duration
+        )
+        .set_fps(
+            FPS
+        )
+    )
+
+    final = CompositeVideoClip(
+        [
+            video,
+            text_clip
+        ],
+        size=(
+            WIDTH,
+            HEIGHT
+        )
+    )
+
+    return final
 
 
 # ============================================================
@@ -798,24 +1406,13 @@ def prepare_video_background(
 # ============================================================
 
 def add_music(
-    video_clip,
-    music_path,
-    duration,
+    video,
+    music_path: Path,
+    duration: int,
 ):
-    """
-    Add background music and loop if necessary.
-    """
-
-    if music_path is None:
-
-        print(
-            "⚠️ No music found."
-        )
-
-        return video_clip
 
     print(
-        f"🎵 Music: {music_path.name}"
+        f"🎵 Loading music: {music_path}"
     )
 
     music = AudioFileClip(
@@ -829,41 +1426,57 @@ def add_music(
     if music.duration < duration:
 
         loops = int(
-            duration / music.duration
-        ) + 1
+            math.ceil(
+                duration
+                / music.duration
+            )
+        )
 
-        audio_clips = []
+        clips = []
 
-        for _ in range(loops):
+        for _ in range(
+            loops
+        ):
 
-            audio_clips.append(
+            clips.append(
                 AudioFileClip(
                     str(music_path)
                 )
             )
 
-        from moviepy.audio.AudioClip import concatenate_audioclips
-
         music = concatenate_audioclips(
-            audio_clips
+            clips
         )
+
+    # --------------------------------------------------------
+    # Trim.
+    # --------------------------------------------------------
 
     music = music.subclip(
         0,
-        min(
-            duration,
-            music.duration,
-        ),
+        duration
     )
 
-    # Background music should not overpower the video.
+    # --------------------------------------------------------
+    # Keep user's music audible.
+    #
+    # No TTS exists in this project.
+    # --------------------------------------------------------
+
     music = music.volumex(
-        0.35
+        float(
+            os.getenv(
+                "MUSIC_VOLUME",
+                "0.40"
+            )
+        )
     )
 
-    return video_clip.set_audio(
+    video = video.set_audio(
         music
     )
+
+    return video
 
 
 # ============================================================
@@ -871,202 +1484,168 @@ def add_music(
 # ============================================================
 
 def create_video(
-    shayari: str,
-    output_path: Path,
+    lines: List[str],
+    output_path: str,
     duration: int = DEFAULT_DURATION,
-):
-    """
-    Main video creation function.
+) -> str:
 
-    Output:
-        1080x1920 MP4
-    """
-
-    output_path = Path(
-        output_path
-    )
-
-    output_path.parent.mkdir(
+    OUTPUT_DIR.mkdir(
         parents=True,
-        exist_ok=True,
+        exist_ok=True
     )
-
-    print(
-        "🎬 Preparing video..."
-    )
-
-    # --------------------------------------------------------
-    # Find assets
-    # --------------------------------------------------------
 
     background_path = find_background()
 
     music_path = find_music()
 
+    print()
+    print("=" * 60)
+    print("HINDI / HINGLISH SHAYARI VIDEO")
+    print("=" * 60)
+
     print(
-        f"🖼️ Background: {background_path}"
+        f"Background: {background_path}"
     )
 
-    if music_path:
-        print(
-            f"🎵 Music: {music_path}"
-        )
+    print(
+        f"Music: {music_path}"
+    )
+
+    print(
+        f"Resolution: {WIDTH}x{HEIGHT}"
+    )
+
+    print(
+        f"Duration: {duration}s"
+    )
+
+    print(
+        "Design: USER BACKGROUND + STATIC TEXT ONLY"
+    )
 
     # --------------------------------------------------------
-    # Background
+    # Generate background video.
     # --------------------------------------------------------
 
-    if background_path.suffix.lower() in [
+    extension = (
+        background_path
+        .suffix
+        .lower()
+    )
+
+    video_extensions = {
         ".mp4",
         ".mov",
+        ".mkv",
+        ".avi",
         ".webm",
-    ]:
+    }
 
-        background_clip = (
-            prepare_video_background(
-                background_path,
-                duration,
-            )
+    if extension in video_extensions:
+
+        video = create_video_background(
+            background_path,
+            lines,
+            duration
         )
 
     else:
 
-        background_image = (
-            prepare_image_background(
-                background_path
-            )
-        )
-
-        background_clip = (
-            ImageClip(
-                str(background_image)
-            )
-            .set_duration(
-                duration
-            )
-        )
-
-    # --------------------------------------------------------
-    # Create static Shayari card.
-    # --------------------------------------------------------
-
-    print(
-        "📝 Creating static Shayari card..."
-    )
-
-    card_image = create_shayari_card(
-        shayari
-    )
-
-    card_path = (
-        output_path.parent
-        / "_shayari_card.png"
-    )
-
-    card_image.save(
-        card_path
-    )
-
-    card_clip = (
-        ImageClip(
-            str(card_path)
-        )
-        .set_duration(
+        video = create_image_video(
+            background_path,
+            lines,
             duration
         )
-    )
 
     # --------------------------------------------------------
-    # Composite
+    # Add user's music.
     # --------------------------------------------------------
 
-    final_video = CompositeVideoClip(
-        [
-            background_clip,
-            card_clip,
-        ],
-        size=(
-            WIDTH,
-            HEIGHT,
-        ),
-    ).set_duration(
+    video = add_music(
+        video,
+        music_path,
         duration
     )
 
     # --------------------------------------------------------
-    # Add music
+    # Write MP4.
     # --------------------------------------------------------
 
-    final_video = add_music(
-        final_video,
-        music_path,
-        duration,
-    )
-
-    # --------------------------------------------------------
-    # Render
-    # --------------------------------------------------------
-
+    print()
     print(
-        "🎞️ Rendering 1080x1920 video..."
+        "🎬 Rendering final MP4..."
     )
 
-    final_video.write_videofile(
+    video.write_videofile(
         str(output_path),
+
         fps=FPS,
+
         codec="libx264",
+
         audio_codec="aac",
+
+        audio_bitrate="192k",
+
         preset="medium",
+
+        bitrate="6000k",
+
         threads=4,
+
         ffmpeg_params=[
             "-pix_fmt",
             "yuv420p",
+
             "-movflags",
             "+faststart",
         ],
-        logger="bar",
+
+        temp_audiofile=str(
+            OUTPUT_DIR
+            / "temp_audio.m4a"
+        ),
+
+        remove_temp=True,
     )
 
     # --------------------------------------------------------
-    # Cleanup
+    # Close resources.
     # --------------------------------------------------------
 
     try:
-        final_video.close()
-
+        video.close()
     except Exception:
         pass
 
-    try:
-        background_clip.close()
-
-    except Exception:
-        pass
+    print()
+    print("=" * 60)
+    print("✅ VIDEO CREATED")
+    print("=" * 60)
 
     print(
-        f"✅ Video created: {output_path}"
+        output_path
     )
 
-    return output_path
+    return str(
+        output_path
+    )
 
 
 # ============================================================
-# ALIAS
+# COMPATIBILITY ALIAS
 # ============================================================
 
 def generate_video(
-    shayari: str,
-    output_path: Path,
+    lines: List[str],
+    output_path: str,
     duration: int = DEFAULT_DURATION,
-):
-    """
-    Alias for compatibility.
-    """
+) -> str:
 
     return create_video(
-        shayari=shayari,
+        lines=lines,
         output_path=output_path,
-        duration=duration,
+        duration=duration
     )
 
 
@@ -1076,20 +1655,23 @@ def generate_video(
 
 if __name__ == "__main__":
 
-    test_text = (
-        "Kuch log dil mein bas jaate hain,\n"
-        "Phir chahe kitni bhi door chale jaayein,\n"
-        "Unki yaadein paas hi rehti hain."
-    )
+    test_lines = [
+        "Jo dil se chaha,",
+        "woh kabhi mera hua hi nahi,",
+        "",
+        "aur jise bhoolna chaha,",
+        "uski yaadein kabhi gayi hi nahi.",
+    ]
 
     output = (
-        ROOT_DIR
-        / "output"
+        OUTPUT_DIR
         / "test_shayari.mp4"
     )
 
     create_video(
-        shayari=test_text,
-        output_path=output,
-        duration=15,
+        lines=test_lines,
+        output_path=str(
+            output
+        ),
+        duration=15
     )
