@@ -158,5 +158,12 @@
     "model": "gemini-3.6-flash",
     "source": "gemini",
     "timestamp": 1788855318
+  },
+  {
+    "title": "Purani Baatein",
+    "shayari": "Baat ab kam hoti hai humare beech,\npar khayal aaj bhi tera hi aata hai.\n\nTujhe lagta hai hum aage badh gaye,\npar dil wahi purani baat par thahar jata hai.",
+    "model": "gemini-3.6-flash",
+    "source": "gemini",
+    "timestamp": 1788872272
   }
 ]
