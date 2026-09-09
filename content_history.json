@@ -172,5 +172,12 @@
     "model": "gemini-3.6-flash",
     "source": "gemini",
     "timestamp": 1788941905
+  },
+  {
+    "title": "Adhoori Mohabbat",
+    "shayari": "Mohabbat poori hoti,\ntoh kahani chhoti hoti,\n\njo adhoori reh gayi,\nshayad wahi sabse gehri thi.",
+    "model": "gemini-3.6-flash",
+    "source": "local_fallback",
+    "timestamp": 1788958963
   }
 ]
