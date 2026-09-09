@@ -165,5 +165,12 @@
     "model": "gemini-3.6-flash",
     "source": "gemini",
     "timestamp": 1788872272
+  },
+  {
+    "title": "Dil Ki Adhoori Baatein",
+    "shayari": "Kuch baatein bina kahe hi reh gayi,\nKuch sawaal dil mein hi dafn ho gaye.\n\nHum toh chale the ek saath hamesha ke liye,\nNa jaane kab hum akele ho gaye.",
+    "model": "gemini-3.6-flash",
+    "source": "gemini",
+    "timestamp": 1788941905
   }
 ]
