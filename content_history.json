@@ -186,5 +186,12 @@
     "model": "gemini-3.6-flash",
     "source": "gemini",
     "timestamp": 1789028284
+  },
+  {
+    "title": "Jeene Ki Aadat",
+    "shayari": "Muskurane ki wajah ab dhoondhte nahi hum,\njo lamha mila use hi jee lete hain.\n\nZindagi ne sikhaya hai chup rehna,\nisliye ab har dard khamoshi se pee lete hain.",
+    "model": "gemini-3.6-flash",
+    "source": "gemini",
+    "timestamp": 1789045171
   }
 ]
