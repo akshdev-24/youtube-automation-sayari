@@ -179,5 +179,12 @@
     "model": "gemini-3.6-flash",
     "source": "local_fallback",
     "timestamp": 1788958963
+  },
+  {
+    "title": "Yaadon Ka Kona",
+    "shayari": "Thoda sa waqt aur maanga tha zindagi se,\nusne toh humein aane wale kal se hi juda kar diya.\n\nAb toh bas yaadon ka ek kona bacha hai,\njismein humne tera naam chhupa kar rakha hai.",
+    "model": "gemini-3.6-flash",
+    "source": "gemini",
+    "timestamp": 1789028284
   }
 ]
