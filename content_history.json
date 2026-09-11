@@ -193,5 +193,12 @@
     "model": "gemini-3.6-flash",
     "source": "gemini",
     "timestamp": 1789045171
+  },
+  {
+    "title": "Waqt Aur Tum",
+    "shayari": "Kabhi lagta hai sab badal gaya,\nkabhi lagta hai tu aaj bhi wahi hai.\n\nHum toh wahi khade hain jahan tumne chhoda tha,\nbas waqt thoda aage nikal gaya.",
+    "model": "gemini-3.6-flash",
+    "source": "gemini",
+    "timestamp": 1789114345
   }
 ]
