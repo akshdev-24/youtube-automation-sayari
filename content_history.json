@@ -200,5 +200,12 @@
     "model": "gemini-3.6-flash",
     "source": "gemini",
     "timestamp": 1789114345
+  },
+  {
+    "title": "Dil Ki Khamoshi",
+    "shayari": "Chhoti chhoti baaton par\nmuskura diya karte the hum.\n\nAb toh poori khushi bhi mile,\ntoh dil poochhta hai,\nkya sach mein sab theek hai?",
+    "model": "gemini-3.6-flash",
+    "source": "gemini",
+    "timestamp": 1789131347
   }
 ]
