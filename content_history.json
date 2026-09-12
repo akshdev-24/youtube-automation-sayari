@@ -214,5 +214,12 @@
     "model": "gemini-3.6-flash",
     "source": "gemini",
     "timestamp": 1789200230
+  },
+  {
+    "title": "Khamosh Yaadein",
+    "shayari": "Zaroori nahi ki har dard ka shor ho,\nkuch baatein khamoshi mein bhi gehri hoti hain.\n\nHumne toh muskura kar chalna seekh liya,\npar yeh dil aaj bhi usi purani raah par ruk jata hai.",
+    "model": "gemini-3.6-flash",
+    "source": "gemini",
+    "timestamp": 1789215327
   }
 ]
